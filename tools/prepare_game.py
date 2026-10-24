@@ -38,6 +38,10 @@ def main():
         parser.error('output must be empty; use a new directory to preserve prior runs')
     bm, um = metadata(base), metadata(update)
     profiles = [json.loads(p.read_text(encoding='utf-8')) for p in sorted(args.profiles.glob('*.json'))]
+    # Base and update given the other way round: their title IDs tell (0005000E... is an update)
+    if any(p['title_id'] == um['title_id'] and p['update_title_id'] == bm['title_id'] for p in profiles):
+        print('The base game and the update were given the other way round; using them the right way round.')
+        base, update, bm, um = update, base, um, bm
     matches = [p for p in profiles if p['title_id'] == bm['title_id'] and p['update_title_id'] == um['title_id']]
     if not matches:
         parser.error('expected a Captain Toad base and its matching update (' +
