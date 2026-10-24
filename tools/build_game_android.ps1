@@ -30,7 +30,7 @@ $taskBuild = Join-Path $taskRoot 'build\game-android'
 # Strict HLE stops at the first missing import; foreign-guest mode keeps Wind Waker HD addresses out.
 $taskFlags = '-DCT_DIAGNOSTIC_STRICT_HLE=1 -DCT_FOREIGN_GUEST=1'
 if ($Cpu -ne 'generic') { $taskFlags += " -mcpu=$Cpu" }
-$taskExtra = @('fast_mutex.cpp', 'mcp.cpp', 'reference_hle.cpp' | ForEach-Object { (Join-Path $taskRoot "runtime\$_") -replace '\\', '/' }) -join ';'
+$taskExtra = @('fast_mutex.cpp', 'mcp.cpp', 'reference_hle.cpp', 'ct_frame.cpp', 'ct_prompts.cpp' | ForEach-Object { (Join-Path $taskRoot "runtime\$_") -replace '\\', '/' }) -join ';'
 & $taskCMake -S $taskUpstream -B $taskBuild -G Ninja "-DCMAKE_MAKE_PROGRAM=$taskNinja" `
     "-DCMAKE_TOOLCHAIN_FILE=$taskToolchain" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-33 `
     -DANDROID_STL=c++_shared -DCMAKE_BUILD_TYPE=Release -DWWHD_BUNDLED_DEPS=ON `

@@ -14,9 +14,11 @@ cd CaptainToadRecomp
 powershell -ExecutionPolicy Bypass -File tools/setup_reference.ps1
 ```
 
+On macOS or Linux, run `sh tools/setup_reference.sh` instead; it does the same.
+
 The setup script downloads the pinned runtime/recompiler commit and applies the hook-list and strict diagnostic extensions. It preserves an existing checkout and refuses to change a different revision automatically.
 
-Supply your own Captain Toad Wii U EUR game and v16 update, extracted separately into `code/content/meta` directory trees. [cdecrypt](https://github.com/VitaSmith/cdecrypt) supports NUS installation packages. This repository does not include the game, tickets, keys or the extractor.
+Supply your own Captain Toad Wii U game (EUR or USA) and its v16 update, extracted separately into `code/content/meta` directory trees. [cdecrypt](https://github.com/VitaSmith/cdecrypt) supports NUS installation packages. This repository does not include the game, tickets, keys or the extractor.
 
 Place the extracted trees in `work/extracted/base` and `work/extracted/update`, then run:
 
@@ -46,7 +48,7 @@ Game files, tickets, keys, generated game code, builds and local reports are exc
 
 ## Pinned references
 
-- [ZeldaWWHDRecomp](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp), commit `defb89f21607345e2e97b2c145a071a3f362640c`. Its MPL-2.0 license and credits remain in the reference checkout.
+- [ZeldaWWHDRecomp](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp), commit `0a53327a6876d2c404406ac74fe11ac6a3333a99`. Its MPL-2.0 license and credits remain in the reference checkout.
 - [cdecrypt](https://github.com/VitaSmith/cdecrypt), commit `0ca58c66b0f23309c69b691caf6d39bf8868d96d`, used for the initial local extraction. Its original license remains in the separate `work/cdecrypt` checkout.
 
 The reference recompiler accepts an optional `hook_paths` argument. Omitting it preserves the original behavior; passing `[]` explicitly disables all hooks. This prototype always uses `[]`, so Zelda-specific addresses and hooks are not applied to Captain Toad. `tools/patch_reference.py` reproduces this extension and rejects an unexpected source layout.
@@ -83,7 +85,7 @@ python tools/patch_reference.py upstream
 python tools/recompile.py --output build/gen-new
 ```
 
-The generator rejects an RPX whose SHA-256 differs from the identified profile. Do not select Zelda's USA profile to bypass this check.
+The generator rejects an RPX whose SHA-256 differs from the identified profile. Do not select another game's profile to bypass this check.
 
 The default Android build uses SDK `C:\Android\Sdk`, NDK `30.0.16248370`, CMake `4.1.2`, Android API 33 and ABI `arm64-v8a`. These are prototype build parameters, not a list of verified compatible devices.
 
@@ -143,7 +145,32 @@ build/game-windows/wwhd.exe --game game
 
 On October 10, 2026, on a Snapdragon X PC (Adreno X1-85, Vulkan 1.3.295), the game loaded its shader, layout, font and localized message archives, initialized audio and its worker threads, faded in the title screen and played the opening cutscene on the TV and GamePad views at 46–60 frames per second. It looked up a Super Mario 3D World save, found none and continued to the episode book menu, about 4,000 frames after startup. Idle at the book, it plays its attract demo of the first level, collecting coins, gems and the Power Star.
 
-Input was checked with the reference's scripted test input, timed from the book (`WWHD_TEST_ORIGIN=4000`): A opens the book at Plucky Pass Beginnings, a second A starts the level, and holding the left stick walks Captain Toad away from the start, collecting four coins. The same script without the stick leaves him at the start with no coins. The game writes `save/user/GameData.bin` next to the executable. Runs of up to 140 seconds, including a level, hit no missing import. The executable and any frame captures contain recompiled game code or game imagery and stay local. Window titles and logs still use the reference's Wind Waker HD naming.
+Input was checked with the reference's scripted test input, timed from the book (`WWHD_TEST_ORIGIN=4000`): A opens the book at Plucky Pass Beginnings, a second A starts the level, and holding the left stick walks Captain Toad away from the start, collecting four coins. The same script without the stick leaves him at the start with no coins. The game writes `save/user/GameData.bin` next to the executable. Runs of up to 140 seconds, including a level, hit no missing import. The executable and any frame captures contain recompiled game code or game imagery and stay local. `tools/patch_runtime.py` renames the runtime's window titles, menus, dialogs, overlay, logs and per-user folders for Captain Toad.
+
+## Run the game (macOS)
+
+`tools/build_game_macos.sh` makes `build/game-macos/Captain Toad Treasure Tracker.app` for Apple Silicon Macs, a portable app. Its first start asks for your base game and v16 update, each as an extracted folder (`code`, `content`, `meta`) or a `.rar`, `.zip` or `.7z` archive of one, then prepares the game on the Mac: it extracts the archives, merges the update over the base game, translates `Kinopio.rpx` and compiles the patched reference runtime with it. Later starts launch the game directly; hold Shift while starting it to run the setup again. The runtime has the Metal renderer and the Vulkan renderer through MoltenVK in one executable, with the AppKit host (TV/GamePad windows, menus, controls window, input, audio).
+
+```sh
+xcode-select --install
+brew install cmake ninja vulkan-headers vulkan-loader molten-vk glslang zstd
+sh tools/build_game_macos.sh
+open "build/game-macos/Captain Toad Treasure Tracker.app"
+```
+
+The app runs this repository's tools, so keep the repository where it is. Everything the setup and the game create stays in `build/game-macos/data/`: the prepared game, the generated code, the runtime (`bin/Captain Toad Treasure Tracker.app`, shown as Captain Toad: Treasure Tracker, with an icon made from the game's own title art), saves (`save/`), the setup log and, through `WWHD_USER_DIR`, settings, controls, save states, shader caches and logs (`user/`). The icon, like everything else made from the game, stays in `build/` and is never committed. Nothing is written to the per-user Library folders or user defaults. The data folder contains game files and recompiled game code: keep it local.
+
+The same steps without the app: `sh tools/setup_game_macos.sh build/game-macos/data <base> <update>`. `tools/build_runtime_macos.sh` rebuilds only the runtime; `CT_RENDERER=METAL` or `CT_RENDERER=VULKAN` (SDL3 host, also needs `brew install sdl3 lz4`) builds a single renderer.
+
+**Mods.** Settings (F1) > Mods installs Captain Toad mods from a file or folder (More > Install from a file or folder) and lists them under Installed, to switch on or off; changes apply after a restart. A mod is a package with `"game_id": "captain-toad"` in its `manifest.json`, or a folder the importer recognises: a content tree that mirrors the game's `content/` folder (SDCafiine style), or a Cemu graphic pack (`rules.txt` with texture rules; shader packs need the Vulkan renderer). The game then reads the mod's files instead of its own. Wind Waker HD packages are refused, and Cemu `patches.txt` code patches are not applied. `sh tools/fetch_cemu_packs_macos.sh` installs the Captain Toad pack from Cemu's community graphic packs (CC0) that works here, Shadow Resolution, switched off. Installed mods live in `data/user/ModManager`.
+
+Both the European (`CT-EUR-v16`) and the American (`CT-USA-v16`) v16 update are identified; `tools/prepare_game.py` and `tools/recompile.py` select the matching profile. The USA executable translates to the same 45,773 functions, 362 used imports and 36 primary-opcode-0 words as the European one. `runtime/mcp.cpp` reports the game's own region from `meta/meta.xml`; with the fixed European region the USA game found no message archive and stopped during startup.
+
+On October 24, 2026, on an Apple M3 Pro with macOS 27.0.1, the app's setup prepared the USA game and v16 update (1,567 files) and compiled it in about a minute. The game started on Metal and on Vulkan through MoltenVK, initialized CoreAudio and ran for 40–60 seconds per test (3,000 frames at about 58 frames per second at 1x internal resolution on Metal) without stopping. Menus, gameplay, input, audio output and saves on macOS have not been checked yet.
+
+Metal is the default renderer. Choose Vulkan with *Graphics > Renderer*. Dynamic resolution starts on (down to 0.75 of the internal resolution), so scenes the GPU cannot draw in time cost resolution instead of frame rate.
+
+The *Gameplay* menu and the settings overlay's *Cheats* edit the save (`save/user/GameData.bin`, kept as `GameData.bin.before-cheats` before the first cheat) and restart the game: unlock every episode and course, clear every course, every Super Gem, every bonus objective, every challenge time, every Pixel Toad and 100% completion. The course list comes from the game's `content/SystemData/StageList.szs`; the save layout follows the CTSe save editor's description. Clearing episode 3's final course also marks the ending as seen, as the game does after the credits: a save with that course cleared and the ending unseen makes the episode book fail.
 
 ## Build the Android test APK
 

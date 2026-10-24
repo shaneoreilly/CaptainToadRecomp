@@ -76,16 +76,16 @@ REPLACEMENTS = {
          '    auto df=format_info(uint32_t(d->format.value()),bool(uint32_t(d->format.value())&0x800));\n',
          '    auto sf=format_info(uint32_t(s->format.value()),(s->resFlag&(1u<<2))!=0);  // GX2_RESFLAG_USAGE_DEPTH_BUFFER\n'
          '    auto df=format_info(uint32_t(d->format.value()),(d->resFlag&(1u<<2))!=0);\n'),
-        ('        throw std::runtime_error("Unsupported CPU GX2CopySurface format layout");\n',
-         '        throw std::runtime_error("Unsupported CPU GX2CopySurface format layout: " +\n'
+        ('        exception_report::raise("Unsupported CPU GX2CopySurface format layout");\n',
+         '        exception_report::raise("Unsupported CPU GX2CopySurface format layout: " +\n'
          '            std::to_string(uint32_t(s->format.value())) + " tile " + std::to_string(uint32_t(s->tileMode.value())) + " -> " +\n'
          '            std::to_string(uint32_t(d->format.value())) + " tile " + std::to_string(uint32_t(d->tileMode.value())));\n'),
     ],
     # Stream out (Cemu GX2_Streamout.cpp, LatteCommandProcessor.cpp, LatteStreamoutGPU.cpp): context
     # updates run on the render thread in command order; draws advance each buffer's write offset.
     'src/gx2/gx2_cmd.h': [
-        ('    OP_LAYOUT_CONTENT,  // DrawSelf scope: clip TV menu content to the native layout region\n    OP_COUNT\n',
-         '    OP_LAYOUT_CONTENT,  // DrawSelf scope: clip TV menu content to the native layout region\n'
+        ('    OP_CLOUDS_END,\n    OP_COUNT\n',
+         '    OP_CLOUDS_END,\n'
          '    OP_STREAMOUT_UPDATE,  // buffer index, mode (0 reset, 2 load from context, 3 save to context), context\n'
          '    OP_COUNT\n'),
     ],
@@ -120,8 +120,8 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
          '    }\n'),
     ],
     'src/gx2/gx2_resources.cpp': [
-        ('        set_regs(mmSQ_VTX_SEMANTIC_0, &tmp[mmSQ_VTX_SEMANTIC_0], nsem);\n    }\n}\n',
-         '        set_regs(mmSQ_VTX_SEMANTIC_0, &tmp[mmSQ_VTX_SEMANTIC_0], nsem);\n    }\n'
+        ('        set_regs(mmSQ_VTX_SEMANTIC_0, tmp.at(mmSQ_VTX_SEMANTIC_0), nsem);\n    }\n}\n',
+         '        set_regs(mmSQ_VTX_SEMANTIC_0, tmp.at(mmSQ_VTX_SEMANTIC_0), nsem);\n    }\n'
          '    if (ld32(vs + 0x110))  // usesStreamOut: per-buffer vertex strides in dwords (Cemu GX2_Shader.cpp)\n'
          '        for (uint32 i = 0; i < 4; i++) set_reg(mmVGT_STRMOUT_VTX_STRIDE_0 + i * 4, ld32(vs + 0x114 + 4 * i) >> 2);\n'
          '}\n'),
@@ -129,6 +129,13 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
     'src/savestate.cpp': [
         ('fopen((config::game_dir + "/code/cking.rpx").c_str(), "rb")',
          'fopen((config::game_dir + "/code/Kinopio.rpx").c_str(), "rb")'),
+        # The stage name is Wind Waker HD data: closing the window asked for it and read the null page.
+        ('    const char* p = (const char*)mem::ptr(kStageName);\n',
+         '    if (!guest_data_valid(0x1046F0B0)) return "";\n'
+         '    const char* p = (const char*)mem::ptr(kStageName);\n'),
+        # Portable states hold Wind Waker HD save data: Captain Toad's states are always full ones.
+        ('bool full_states() {\n',
+         'bool full_states() {\n#ifdef CT_FOREIGN_GUEST\n    return true;\n#endif\n'),
     ],
 }
 # The Android app gets its own package and name, so installing it never replaces a Wind Waker HD
@@ -145,6 +152,238 @@ REPLACEMENTS['../CMakeLists.txt'] = [
      '# Captain Toad runtime services the reference runtime lacks (CaptainToadRecomp tools/patch_runtime.py)\n'
      'set(CT_EXTRA_SOURCES "" CACHE STRING "Captain Toad runtime sources added to the game executable")\n'
      'target_sources(wwhd PRIVATE ${CT_EXTRA_SOURCES})\n'),
+]
+# Captain Toad cheats (runtime/cheats.cpp, runtime/ct_save.h) replace the Wind Waker HD ones: save edits
+# applied with a restart, listed in the Gameplay menu and the settings overlay.
+REPLACEMENTS['src/gfx/menu.mm'] = [
+    ('#include "../mods/mods.h"\n', '#include "../mods/mods.h"\n#include "../mods/ct_save.h"\n#include <tuple>\n'),
+    (('    [gp addItemWithTitle:@"Cheats (save in game to keep them)" action:nil keyEquivalent:@""].enabled = NO;\n'
+         '    toggle(gp, @"    Give all items", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatItems); },\n'
+         '           @"Every inventory item, light arrows, deluxe picto box, power bracelets, 4 bottles, 99 arrows and bombs");\n'
+         '    toggle(gp, @"    Equip Master Sword and Mirror Shield (until reload)", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatSword); });\n'
+         '    toggle(gp, @"    20 hearts, double magic, 5000 rupees", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatStats); },\n'
+         '           @"Also refills hearts and magic");\n'
+         '    toggle(gp, @"    Fill the bags (spoils and bait)", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatBags); },\n'
+         '           @"Spoils bag and bait bag (if missing), every kind of spoils x99, empty bait slots filled");\n'
+         '    for (auto [title, which] : {std::pair{@"    Infinite health", mods::kInfHealth}, {@"    Infinite magic", mods::kInfMagic},\n'
+         '                                {@"    Infinite arrows and bombs", mods::kInfAmmo}, {@"    Infinite rupees", mods::kInfRupees},\n'
+         '                                {@"    Infinite bait and spoils", mods::kInfBags}, {@"    Infinite swimming", mods::kInfBreath}}) {\n'
+         '        int bit = which;  // (blocks cannot capture structured bindings)\n'
+         '        toggle(gp, title, ^BOOL { return mods::infinite(bit); }, ^(BOOL on) { mods::set_infinite(bit, on); });\n'
+         '    }\n'
+         '    [gp addItem:[NSMenuItem separatorItem]];\n'
+         '    NSString* story = @"Can change or break story events: the game may skip or repeat scenes that teach or check this. "\n'
+         '                      @"Save to a different file first.";\n'
+         '    [gp addItemWithTitle:@"⚠️ Story cheats (can break story events; use a spare save file)" action:nil keyEquivalent:@""].enabled = NO;\n'
+         '    toggle(gp, @"    All songs", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatSongs); }, story);\n'
+         '    toggle(gp, @"    All Triforce shards", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatTriforce); }, story);\n'
+         '    toggle(gp, @"    Map, compass and boss key (this dungeon)", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatDungeon); }, story);\n'
+         '    toggle(gp, @"    Add a small key (this dungeon)", ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(mods::kCheatKey); }, story);\n'),
+     ('    [gp addItemWithTitle:@"Cheats (the game restarts; play since its last save is lost)" action:nil keyEquivalent:@""].enabled = NO;\n'
+         '    for (auto [title, which, tip] : {\n'
+         '             std::tuple{@"    Unlock every episode and course", (int)ct_save::kUnlockEpisodes, @"Episodes 2 and 3, the bonus episode and every course page"},\n'
+         '             {@"    Clear every course", (int)ct_save::kClearCourses, @"Every course counts as cleared, with the ending seen; the episodes open"},\n'
+         '             {@"    Every Super Gem", (int)ct_save::kAllGems, @"All 192 Super Gems"},\n'
+         '             {@"    Every bonus objective", (int)ct_save::kAllBonus, @"The second Toad Stamp\'s task in every course that has one"},\n'
+         '             {@"    Every challenge time", (int)ct_save::kAllTimes, @"Each course\'s best time set to its challenge time unless it is already faster"},\n'
+         '             {@"    Every Pixel Toad", (int)ct_save::kAllPixelToads, @"Pixel Toad found in every course that hides one: the golden Pixel Toad on each episode"},\n'
+         '             {@"    100% completion", (int)ct_save::kComplete, @"All of the above, every course 100%, Coins Galore and Mummy-Me Maze Forever: every Toad Stamp with glittering stars"}}) {\n'
+         '        int bit = which;  // (blocks cannot capture structured bindings)\n'
+         '        toggle(gp, title, ^BOOL { return NO; }, ^(BOOL) { mods::request_cheat(bit); }, tip);\n'
+         '    }\n')),
+]
+REPLACEMENTS['src/overlay/overlay.cpp'] = [
+    ('#include "../mods/mods.h"\n', '#include "../mods/mods.h"\n#include "../mods/ct_save.h"\n'),
+    (('void cheats() {\n'
+         '    bool v;\n'
+         '    note("Save in the game to keep them.");\n'
+         '    auto cheat = [first = true](const char* label, int which) mutable {\n'
+         '        if (!first) modsui::same_line_if_fits(label);\n'
+         '        first = false;\n'
+         '        if (ImGui::Button(label)) mods::request_cheat(which);\n'
+         '    };\n'
+         '    cheat("Give all items", mods::kCheatItems);\n'
+         '    cheat("Equip Master Sword + Mirror Shield (until reload)", mods::kCheatSword);\n'
+         '    cheat("20 hearts, double magic, 5000 rupees", mods::kCheatStats);\n'
+         '    cheat("Fill the bags (spoils and bait)", mods::kCheatBags);\n'
+         '    static const std::pair<const char*, int> inf[] = {{"Infinite health", mods::kInfHealth}, {"Infinite magic", mods::kInfMagic},\n'
+         '                                                      {"Infinite arrows and bombs", mods::kInfAmmo},\n'
+         '                                                      {"Infinite rupees", mods::kInfRupees},\n'
+         '                                                      {"Infinite bait and spoils", mods::kInfBags},\n'
+         '                                                      {"Infinite swimming", mods::kInfBreath},\n'
+         '                                                      {"Moon jump (hold L; left stick steers)", mods::kMoonJump},\n'
+         '                                                      {"No fall damage after moon jump", mods::kMoonNoFall}};\n'
+         '    for (const auto& [label, which] : inf) {\n'
+         '        int bit = which;\n'
+         '        if (check(label, mods::infinite(bit), &v)) hostui::post([bit, v] { mods::set_infinite(bit, v); });\n'
+         '    }\n'
+         '    heading("Story cheats (can break story events; use a spare save file)");\n'
+         '    auto story = [first = true](const char* label, int which) mutable {\n'
+         '        if (!first) modsui::same_line_if_fits(label);\n'
+         '        first = false;\n'
+         '        if (ImGui::Button(label)) mods::request_cheat(which);\n'
+         '    };\n'
+         '    story("All songs", mods::kCheatSongs);\n'
+         '    story("All Triforce shards", mods::kCheatTriforce);\n'
+         '    story("Map, compass, boss key", mods::kCheatDungeon);\n'
+         '    story("Small key", mods::kCheatKey);\n'
+         '}\n'),
+     ('void cheats() {\n'
+         '    note("Each cheat changes the save and restarts the game: play since the game last saved is lost. "\n'
+         '         "The save before the first cheat is kept as GameData.bin.before-cheats.");\n'
+         '    auto cheat = [first = true](const char* label, int which) mutable {\n'
+         '        if (!first) modsui::same_line_if_fits(label);\n'
+         '        first = false;\n'
+         '        if (ImGui::Button(label)) mods::request_cheat(which);\n'
+         '    };\n'
+         '    cheat("Unlock every episode and course", ct_save::kUnlockEpisodes);\n'
+         '    cheat("Clear every course", ct_save::kClearCourses);\n'
+         '    cheat("Every Super Gem", ct_save::kAllGems);\n'
+         '    cheat("Every bonus objective", ct_save::kAllBonus);\n'
+         '    cheat("Every challenge time", ct_save::kAllTimes);\n'
+         '    cheat("Every Pixel Toad", ct_save::kAllPixelToads);\n'
+         '    heading("Everything");\n'
+         '    cheat("100% completion (every Toad Stamp, glittering stars, golden Pixel Toads)", ct_save::kComplete);\n'
+         '}\n')),
+]
+# Dynamic resolution starts on (down to 0.75 of the internal resolution), so a scene the GPU can't
+# draw in time costs resolution instead of frame rate. The saved setting and WWHD_DYNRES_MIN still win.
+REPLACEMENTS['src/dynres.cpp'] = [
+    ('std::atomic<float> g_min{env_min() ? clamp_min((float)atof(env_min())) : 0.0f};\n',
+     'std::atomic<float> g_min{env_min() ? clamp_min((float)atof(env_min())) : 0.75f};\n'),
+]
+# Settings that only act on Wind Waker HD (its frame pacing hooks, camera, projection, sky, clouds,
+# bloom and occlusion shaders, gameplay mods) are left out of the Captain Toad runtime: the Graphics
+# and Gameplay menus and the settings overlay keep what applies to any game.
+_ct_only = '#ifndef CT_FOREIGN_GUEST  // Wind Waker HD only (CaptainToadRecomp tools/patch_runtime.py)\n'
+_ct_end = '#endif  // Wind Waker HD only\n'
+REPLACEMENTS['src/overlay/overlay.cpp'] += [
+    ('    heading("Frame rate");\n', _ct_only + '    heading("Frame rate");\n'),
+    ('    // debug only, not saved (gx2::uncapped)\n', _ct_end + '    // debug only, not saved (gx2::uncapped)\n'),
+    ('    float fovPercent=aspect::fov_scale()*100.0f;\n', _ct_only + '    float fovPercent=aspect::fov_scale()*100.0f;\n'),
+    ('            post_changed([i] { aspect::set_mode(i); hostui::set("aspectMode", std::to_string(i)); });\n    }\n',
+     '            post_changed([i] { aspect::set_mode(i); hostui::set("aspectMode", std::to_string(i)); });\n    }\n' + _ct_end),
+    ('    float bloom = render::bloom_strength() * 100.0f;\n', _ct_only + '    float bloom = render::bloom_strength() * 100.0f;\n'),
+    ('        post_changed([v] { render::set_ao_hires(v); });\n', '        post_changed([v] { render::set_ao_hires(v); });\n' + _ct_end),
+]
+# Saved settings from a Wind Waker HD build (or an earlier Captain Toad one) still reach the setters of
+# those features: the gameplay FOV rescaled Captain Toad's 2D layouts and broke its text. They keep the
+# original game's values here whatever is saved.
+_ct_keep = '#ifdef CT_FOREIGN_GUEST\n    {}\n#endif\n'
+REPLACEMENTS['src/aspect.cpp'] = [
+    ('void set_mode(int m) {\n    if (m < 0 || m >= kModes) return;\n',
+     'void set_mode(int m) {\n' + _ct_keep.format('m = kOriginal;  // Wind Waker HD only') + '    if (m < 0 || m >= kModes) return;\n'),
+    ('void set_fov_scale(float scale) {\n', 'void set_fov_scale(float scale) {\n' + _ct_keep.format('scale = 1.0f;  // Wind Waker HD only')),
+]
+REPLACEMENTS['src/interp.cpp'] = [
+    ('void set_mode(int m) {\n    g_on = false;\n',
+     'void set_mode(int m) {\n' + _ct_keep.format('m = 0;  // Wind Waker HD frame pacing (its hooks); Captain Toad runs at 60') + '    g_on = false;\n'),
+]
+REPLACEMENTS['src/gfx/renderer.cpp'] = [
+    ('void set_cloud_style(int style) { g_cloud_style.store(std::clamp(style, 0, 2), std::memory_order_relaxed); }\n',
+     '#ifdef CT_FOREIGN_GUEST\nvoid set_cloud_style(int) { g_cloud_style.store(0, std::memory_order_relaxed); }  // Wind Waker HD only\n#else\n'
+     'void set_cloud_style(int style) { g_cloud_style.store(std::clamp(style, 0, 2), std::memory_order_relaxed); }\n#endif\n'),
+    ('void set_cloud_shadows(bool on) { g_cloud_shadows.store(on, std::memory_order_relaxed); }\n',
+     '#ifdef CT_FOREIGN_GUEST\nvoid set_cloud_shadows(bool) { g_cloud_shadows.store(false, std::memory_order_relaxed); }  // Wind Waker HD only\n#else\n'
+     'void set_cloud_shadows(bool on) { g_cloud_shadows.store(on, std::memory_order_relaxed); }\n#endif\n'),
+    ('void set_horizon_haze(float v) {\n', 'void set_horizon_haze(float v) {\n' + _ct_keep.format('v = 1.0f;  // Wind Waker HD only')),
+    ('void set_bloom_strength(float v) {\n', 'void set_bloom_strength(float v) {\n' + _ct_keep.format('v = 1.0f;  // Wind Waker HD only')),
+]
+REPLACEMENTS['src/gfx/metal_draw.mm'] = [
+    ('void set_ao_mode(int m) { g_ao_mode = m % 3;',
+     'void set_ao_mode(int m) {\n' + _ct_keep.format('m = 0;  // Wind Waker HD only') + '    g_ao_mode = m % 3;'),
+    ('void set_ao_hires(bool v) { g_ao_hires = v;',
+     'void set_ao_hires(bool v) {\n' + _ct_keep.format('v = false;  // Wind Waker HD only') + '    g_ao_hires = v;'),
+]
+REPLACEMENTS['src/gfx/vulkan/settings.cpp'] = [
+    ('void set_ao_mode(int v) { settings().ao.store(normalize(v),std::memory_order_relaxed);',
+     'void set_ao_mode(int v) {\n' + _ct_keep.format('v = 0;  // Wind Waker HD only') + '    settings().ao.store(normalize(v),std::memory_order_relaxed);'),
+    ('void set_ao_hires(bool v) { settings().hires.store(v,std::memory_order_relaxed);',
+     'void set_ao_hires(bool v) {\n' + _ct_keep.format('v = false;  // Wind Waker HD only') + '    settings().hires.store(v,std::memory_order_relaxed);'),
+]
+# PlayStation button prompts: the game reads a copy of FontData.szs with shapes for U+E000..E003
+# (runtime/ct_prompts.cpp), the way the reference serves its item icon pack.
+REPLACEMENTS['src/hle/fs.cpp'] = [
+    ('    if(mode=="r"||mode=="rb")if(auto icons=item_icons::pack_for(guest,path);!icons.empty())return icons;\n',
+     '    if(mode=="r"||mode=="rb")if(auto icons=item_icons::pack_for(guest,path);!icons.empty())return icons;\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if(mode=="r"||mode=="rb")if(auto font=ct_prompts::font_for(guest,path);!font.empty())return font;  // runtime/ct_prompts.cpp\n'
+     '#endif\n'),
+    ('#include "../rtl_text.h"\n',
+     '#include "../rtl_text.h"\n'
+     '#ifdef CT_FOREIGN_GUEST\nnamespace ct_prompts { std::string font_for(const std::string& guest, const std::string& host_path); }\n#endif\n'),
+]
+# Mods: Captain Toad packages (content trees, Cemu graphic packs, SDCafiine folders) installed from a file
+# or folder, with their own game ID so Wind Waker HD mods are refused. The Wind Waker HD catalogue, its
+# built-in mods, the GameCube game and code mods (Wind Waker HD's guest ABI) are left out; Cheats stay in
+# More. The tab is Mods again.
+_ct_package_id = ('#ifdef CT_FOREIGN_GUEST\n#define WWHD_PACKAGE_GAME_ID "captain-toad"  // CaptainToadRecomp\n'
+                  '#else\n#define WWHD_PACKAGE_GAME_ID "wwhd"\n#endif\n')
+REPLACEMENTS['src/mods/packages.h'] = [
+    ('inline constexpr const char* kGameId="wwhd";\ninline constexpr const char* kLegacyGameId="wwhd-usa";\n',
+     '#ifdef CT_FOREIGN_GUEST  // Captain Toad packages (CaptainToadRecomp); Wind Waker HD ones are refused\n'
+     'inline constexpr const char* kGameId="captain-toad";\ninline constexpr const char* kLegacyGameId="captain-toad";\n#else\n'
+     'inline constexpr const char* kGameId="wwhd";\ninline constexpr const char* kLegacyGameId="wwhd-usa";\n#endif\n'),
+]
+for _file in ('src/mods/content.cpp', 'src/mods/cemu_pack.cpp'):
+    REPLACEMENTS[_file] = [
+        ('#include "../exception_report.h"\n', '#include "../exception_report.h"\n' + _ct_package_id),
+        ('m["game_id"]="wwhd"', 'm["game_id"]=WWHD_PACKAGE_GAME_ID'),
+    ]
+REPLACEMENTS['src/overlay/mods_tab.h'] = [
+    ('    int area = kBuiltin;     // remembered for the session (State lives as long as the game runs)\n',
+     '#ifdef CT_FOREIGN_GUEST\n    int area = kCommunity;   // Captain Toad: no built-in mods\n#else\n'
+     '    int area = kBuiltin;     // remembered for the session (State lives as long as the game runs)\n#endif\n'),
+    ('            if (ImGui::BeginTabItem(kAreaNames[i], nullptr, f)) {\n',
+     '#ifdef CT_FOREIGN_GUEST\n            if (i == kBuiltin) continue;  // Wind Waker HD\'s built-in mods\n#endif\n'
+     '            if (ImGui::BeginTabItem(kAreaNames[i], nullptr, f)) {\n'),
+    ('    if (h.file_picker && section("GameCube game for mods")) {',
+     '    if (h.file_picker && !kCaptainToad && section("GameCube game for mods")) {'),
+    ('    if (section("Save backups")) {\n', '    if (!kCaptainToad && section("Save backups")) {\n'),
+    ('enum Area { kBuiltin, kCommunity, kMore, kAreas };\n',
+     'enum Area { kBuiltin, kCommunity, kMore, kAreas };\n'
+     '#ifdef CT_FOREIGN_GUEST\ninline constexpr bool kCaptainToad = true;  // CaptainToadRecomp: Wind Waker HD sections left out\n#else\n'
+     'inline constexpr bool kCaptainToad = false;\n#endif\n'),
+    ('inline const char* const kAreaNames[kAreas] = {"Built-in", "Community", "More"};\n',
+     '#ifdef CT_FOREIGN_GUEST\ninline const char* const kAreaNames[kAreas] = {"Built-in", "Installed", "More"};\n#else\n'
+     'inline const char* const kAreaNames[kAreas] = {"Built-in", "Community", "More"};\n#endif\n'),
+]
+REPLACEMENTS['src/overlay/overlay.cpp'] += [
+    ('        h.code_mods = ext::features().code_mods;\n        h.mod_downloads = ext::features().mod_downloads;\n',
+     '#ifdef CT_FOREIGN_GUEST  // no Wind Waker HD catalogue or code mods\n        h.code_mods = false;\n        h.mod_downloads = false;\n#else\n'
+     '        h.code_mods = ext::features().code_mods;\n        h.mod_downloads = ext::features().mod_downloads;\n#endif\n'),
+]
+# A parked thread may resume from either of two return addresses that continue the same way
+# (runtime/ct_frame.cpp ct_equivalent_return: sead's thread loop), so a state saved in one session loads
+# in a new one.
+REPLACEMENTS['src/threads.cpp'] += [
+    ('bool same_chain(const Cpu& cur, const Cpu& saved) {\n',
+     '#ifdef CT_FOREIGN_GUEST\nextern "C" uint32_t ct_equivalent_return(uint32_t lr);  // runtime/ct_frame.cpp\n#else\n'
+     'static uint32_t ct_equivalent_return(uint32_t lr) { return lr; }\n#endif\n'
+     'bool same_chain(const Cpu& cur, const Cpu& saved) {\n'),
+    ('        if (ld32(na + 4) != ss::snap_ld32(na + 4)) return false;\n',
+     '        if (ct_equivalent_return(ld32(na + 4)) != ct_equivalent_return(ss::snap_ld32(na + 4))) return false;\n'),
+    # A thread the game starts later (in a course, for one) cannot be made up: say what to do.
+    ('            snprintf(buf, sizeof buf, "thread %08X (running in the save) does not exist yet", s.guest);\n',
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '            snprintf(buf, sizeof buf, "the game has not started everything the state needs yet (thread %08X): "\n'
+     '                     "go where it was saved (into a course for one saved in a course), then load", s.guest);\n'
+     '#else\n'
+     '            snprintf(buf, sizeof buf, "thread %08X (running in the save) does not exist yet", s.guest);\n'
+     '#endif\n'),
+]
+REPLACEMENTS['src/gfx/menu.mm'] += [
+    ('    [g addItemWithTitle:@"Aspect ratio" action:nil keyEquivalent:@""].enabled = NO;\n',
+     _ct_only + '    [g addItemWithTitle:@"Aspect ratio" action:nil keyEquivalent:@""].enabled = NO;\n'),
+    ('    add(g, @"16x anisotropic filtering (N)", @selector(toggleAniso:), @"N");\n',
+     _ct_end + '    add(g, @"16x anisotropic filtering (N)", @selector(toggleAniso:), @"N");\n'),
+    ('    add(g, @"40 fps: frame interpolation (for 40, 80 and 120 Hz screens)", @selector(toggleInterpFps:), @"", 40);\n',
+     _ct_only + '    add(g, @"40 fps: frame interpolation (for 40, 80 and 120 Hz screens)", @selector(toggleInterpFps:), @"", 40);\n'),
+    ('    add(g, @"60 fps: true 60, game logic at 60 steps/s (7, experimental)", @selector(toggleInterp:), @"7", 2);\n',
+     '    add(g, @"60 fps: true 60, game logic at 60 steps/s (7, experimental)", @selector(toggleInterp:), @"7", 2);\n' + _ct_end),
+    ('    toggle(gp, @"Enable code mods (PowerPC mods)"', _ct_only + '    toggle(gp, @"Enable code mods (PowerPC mods)"'),
+    ('    [gp addItem:[NSMenuItem separatorItem]];\n    [gp addItemWithTitle:@"Cheats (',
+     '    [gp addItem:[NSMenuItem separatorItem]];\n' + _ct_end + '    [gp addItemWithTitle:@"Cheats ('),
 ]
 # Exports that read state private to a reference source file are appended to that file.
 APPENDS = {
@@ -164,7 +403,7 @@ HLE(snd_core, AXGetAuxCallback) {
 ''',
     'src/gx2/gx2_core.cpp': '''
 // ---- Captain Toad additions (CaptainToadRecomp tools/patch_runtime.py)
-HLE(gx2, GX2GetDisplayListWriteStatus) { ret(c, t_rec.start != 0); }  // this thread records a display list
+HLE(gx2, GX2GetDisplayListWriteStatus) { ret(c, recording() != nullptr); }  // this thread records a display list
 HLE(gx2, GX2SetDefaultState) { set_default_state(); }                 // the state GX2Init establishes
 ''',
     'src/gx2/gx2_state.cpp': '''
@@ -218,7 +457,57 @@ HLE(gx2, GX2SetTessellation) {}
 HLE(gx2, GX2SetMaxTessellationLevel) { set_reg(mmVGT_HOS_MAX_TESS_LEVEL, gx2::fbits(fa(c, 0))); }
 HLE(gx2, GX2SetMinTessellationLevel) { set_reg(mmVGT_HOS_MIN_TESS_LEVEL, gx2::fbits(fa(c, 0))); }
 ''',
+    'src/savestate.cpp': '''
+// ---- Captain Toad additions (CaptainToadRecomp tools/patch_runtime.py)
+namespace ss {
+// Captain Toad's frame start (runtime/ct_frame.cpp): the full save and load requests of service(); the
+// rest of it follows Wind Waker HD's scenes, events, portable states and automatic states.
+void ct_service(Cpu* c) {
+    (void)c;
+    // test aids (TV frames), as in service(): WWHD_STATE_SAVE_AT=frame:slot,... / WWHD_STATE_LOAD_AT
+    static const std::vector<Timed> save_at = parse_timed("WWHD_STATE_SAVE_AT"), load_at = parse_timed("WWHD_STATE_LOAD_AT");
+    if (!save_at.empty() || !load_at.empty()) {
+        static uint64_t last = 0;
+        const uint64_t f = render::frame_count();
+        for (auto& t : save_at)
+            if (t.frame > last && t.frame <= f) request_save_full(t.slot);
+        for (auto& t : load_at)
+            if (t.frame > last && t.frame <= f) request_load(t.slot);
+        last = f;
+    }
+    if (int slot = g_save_req.load()) {
+        if (do_save(slot)) {
+            g_save_req = 0;
+            g_attempts = 0;
+        }
+        return;
+    }
+    std::shared_ptr<Snapshot> s;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        s = g_load_ready;
+    }
+    if (s && do_load(s)) {
+        if (s->load_applied) {
+            g_last_load_frame = render::frame_count();
+            g_last_load_step = interp::logic_steps();
+        }
+        {
+            std::lock_guard<std::mutex> lk(g_mu);
+            g_load_ready.reset();
+        }
+        g_loading = false;
+        g_attempts = 0;
+    }
 }
+}  // namespace ss
+''',
+}
+# Captain Toad files that replace or join reference files
+for source, relative in (('cheats.cpp', 'src/mods/cheats.cpp'), ('ct_save.h', 'src/mods/ct_save.h')):
+    text = (Path(__file__).resolve().parent.parent / 'runtime' / source).read_text(encoding='utf-8')
+    (runtime / relative).write_text(text, encoding='utf-8', newline='\n')
+
 MARKER = '\n// ---- Captain Toad additions'
 for relative, text in APPENDS.items():
     path = runtime / relative
@@ -241,11 +530,42 @@ for relative, pairs in REPLACEMENTS.items():
         source = source.replace(old, new)
     path.write_text(source, encoding='utf-8', newline='\n')
 
+# Names the player sees (window titles, menus, dialogs, overlay, logs, crash reports) and the per-user
+# folders outside portable mode name Captain Toad. Only string literals change: comments keep naming
+# the reference code they describe, and the vendored third-party code is left alone.
+BRANDING = [
+    ('The Legend of Zelda: The Wind Waker HD', 'Captain Toad: Treasure Tracker'),
+    ('Wind Waker HD', 'Captain Toad'),
+    ('captures/wwhd', 'captures/captain-toad'),
+    ('./build/cmake/wwhd', 'captain-toad'),
+    ('Application Support/wwhd', 'Application Support/Captain Toad'),
+    ('Application Support/WWHD', 'Application Support/Captain Toad'),
+    ('Library/Caches/wwhd', 'Library/Caches/org.ctrecomp.captaintoad'),
+    ('/.config/wwhd', '/.config/captain-toad'),
+]
+literal = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+def rebrand(match):
+    text = match.group(0)
+    if text == '"/wwhd"':  # $XDG_CONFIG_HOME/wwhd (platform/host.h)
+        return '"/captain-toad"'
+    if text == '"/WWHD"':  # %APPDATA%/WWHD (platform/host.h)
+        return '"/Captain Toad"'
+    for old, new in BRANDING:
+        text = text.replace(old, new)
+    return text
+for path in sorted((runtime / 'src').rglob('*')):
+    if path.suffix not in {'.c', '.cpp', '.h', '.mm'} or 'third_party' in path.parts:
+        continue
+    source = path.read_text(encoding='utf-8')
+    branded = literal.sub(rebrand, source)
+    if branded != source:
+        path.write_text(branded, encoding='utf-8', newline='\n')
+
 STUBS = runtime / 'src/ct_guest_stubs.c'
 symbol = re.compile(r'\bf_([0-9A-F]{8})(_orig)?\b')
 fence = re.compile(r'\bT60_FENCE_(?:LINK|ANY)\(([0-9A-F]{8})')  # pastes f_<address>_orig
 names = set()
-for path in sorted(runtime.rglob('*')):
+for path in sorted((runtime / 'src').rglob('*')):  # sources built into the game executable
     if path.suffix in {'.c', '.cpp', '.h', '.mm'} and path != STUBS:
         text = path.read_text(encoding='utf-8', errors='replace')
         names.update(f'f_{address}{suffix}' for address, suffix in symbol.findall(text))

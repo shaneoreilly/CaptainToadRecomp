@@ -60,7 +60,7 @@ Reaching startup and compiling native code do not establish full game correctnes
 - `patches/`: reference hook-list and strict-HLE extensions.
 - `local-reports/`: detailed manifests, audits and logs, kept outside Git.
 
-Pinned references: ZeldaWWHDRecomp `defb89f21607345e2e97b2c145a071a3f362640c`; cdecrypt `0ca58c66b0f23309c69b691caf6d39bf8868d96d`.
+Pinned references: ZeldaWWHDRecomp `0a53327a6876d2c404406ac74fe11ac6a3333a99`; cdecrypt `0ca58c66b0f23309c69b691caf6d39bf8868d96d`.
 
 ## GX2 resource bootstrap
 
@@ -76,3 +76,7 @@ HiZ follows Cemu: the size query reports 0x1000 bytes with 0x100 alignment and e
 
 On the Snapdragon X (Adreno X1-85) the game loaded its archives, initialized audio and worker threads, faded in the title screen and played the opening cutscene on the TV and GamePad views at 46–60 frames per second. Its Super Mario 3D World save lookup reports no save. Stream-out buffers, strides, offsets and contexts follow Cemu's command semantics, but the renderer skips the rasterizer-killed stream-out draws, so their output is not produced. The game reaches the episode book menu; scripted input opens the book, starts Plucky Pass Beginnings and walks Captain Toad with the left stick, compared against the same run without the stick. Idle at the book, the attract demo plays through the first level. The save is written to `save/user/GameData.bin`; runs of up to 140 seconds hit no missing import.
 
+
+## macOS build
+
+`tools/build_game_macos.sh` makes a portable `build/game-macos/Captain Toad Treasure Tracker.app`. Its first start asks for the base game and v16 update (folders or archives), then extracts, merges, translates and compiles them with the patched runtime (Metal and Vulkan through MoltenVK, AppKit host); later starts launch the game. A USA v16 profile (`CT-USA-v16`) is identified next to the European one, and the MCP region follows the game's `meta/meta.xml`. On October 24, 2026 the USA game started on an Apple M3 Pro under Metal and Vulkan and ran 40–60 second tests without stopping; closing the window no longer reads the reference game's stage name. Menus, gameplay, input, audio output and saves on macOS remain unchecked.

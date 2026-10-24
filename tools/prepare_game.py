@@ -27,6 +27,8 @@ def main():
     parser.add_argument('--update', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--manifest', type=Path, required=True)
+    parser.add_argument('--profiles', type=Path, default=Path(__file__).resolve().parent.parent / 'profiles',
+                        help='identified game profiles (title IDs and update version)')
     args = parser.parse_args()
     base, update, output = [p.resolve() for p in (args.base, args.update, args.output)]
     for source in (base, update):
@@ -35,10 +37,13 @@ def main():
     if output.exists() and any(output.iterdir()):
         parser.error('output must be empty; use a new directory to preserve prior runs')
     bm, um = metadata(base), metadata(update)
-    if bm['title_id'] != '0005000010180700' or um['title_id'] != '0005000e10180700':
-        parser.error('expected Captain Toad EUR base and its matching EUR update')
-    if um['title_version'] != 16:
-        parser.error('this initial profile supports update version 16 only')
+    profiles = [json.loads(p.read_text(encoding='utf-8')) for p in sorted(args.profiles.glob('*.json'))]
+    matches = [p for p in profiles if p['title_id'] == bm['title_id'] and p['update_title_id'] == um['title_id']]
+    if not matches:
+        parser.error('expected a Captain Toad base and its matching update (' +
+                     ', '.join(p['name'] for p in profiles) + ')')
+    if um['title_version'] != matches[0]['update_version']:
+        parser.error(f"profile {matches[0]['name']} supports update version {matches[0]['update_version']} only")
     chosen = {}
     base_count = update_count = overrides = 0
     for label, source in [('base', base), ('update', update)]:
