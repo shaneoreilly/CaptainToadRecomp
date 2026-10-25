@@ -2,7 +2,8 @@
 // one button in the top left corner in place of the reference's view button, the touch controls'
 // show/hide button and the tilt button. Its menu switches the view, shows or hides the touch controls,
 // edits their layout, sets their opacity, turns the phone's gyro on or off, applies the save cheats
-// (runtime/cheats.cpp) and opens the settings window. tools/patch_runtime.py copies this file and
+// (runtime/cheats.cpp) and opens the settings window. It also keeps the camera cutout setting
+// (Settings > Display > Window). tools/patch_runtime.py copies this file and
 // ct_touch_menu.h into the reference runtime (src/), so every build has the opacity setting the
 // settings overlay shows.
 #include <algorithm>
@@ -17,11 +18,13 @@
 namespace ct_touch {
 namespace {
 std::atomic<float> g_opacity{1.0f};
+std::atomic<bool> g_cutout_clear{false};
 std::once_flag g_loaded;
 void load() {
     std::call_once(g_loaded, [] {
         std::string v;
         if (hostui::get("touchOpacity", v)) g_opacity = std::clamp((float)atof(v.c_str()), kOpacityMin, 1.0f);
+        if (hostui::get("cutoutClear", v)) g_cutout_clear = atoi(v.c_str()) != 0;
     });
 }
 }  // namespace
@@ -34,6 +37,15 @@ void set_opacity(float o) {
     load();
     g_opacity = std::clamp(o, kOpacityMin, 1.0f);
     hostui::set("touchOpacity", std::to_string(g_opacity.load()));
+}
+bool cutout_clear() {
+    load();
+    return g_cutout_clear;
+}
+void set_cutout_clear(bool clear) {
+    load();
+    g_cutout_clear = clear;
+    hostui::set("cutoutClear", clear ? "1" : "0");
 }
 }  // namespace ct_touch
 
@@ -79,6 +91,10 @@ extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeC
 }
 extern "C" JNIEXPORT jfloat JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeOpacity(JNIEnv*, jclass) {
     return ct_touch::opacity();
+}
+// WwhdActivity lays the window out around a camera cutout or into it (TouchControls polls this)
+extern "C" JNIEXPORT jboolean JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeCutoutClear(JNIEnv*, jclass) {
+    return ct_touch::cutout_clear();
 }
 extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeSetOpacity(JNIEnv*, jclass, jfloat o) {
     hostui::post([o] { ct_touch::set_opacity(o); });

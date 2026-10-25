@@ -866,7 +866,16 @@ REPLACEMENTS['src/overlay/overlay.cpp'] += [
      '                        "edge for any other size."\n'
      '                      : "Leave full screen to choose a window size.");\n'
      '    }\n'
-     '#endif  // Captain Toad window sizes\n'),
+     '#endif  // Captain Toad window sizes\n'
+     '#if defined(__ANDROID__) && defined(CT_FOREIGN_GUEST)\n'
+     '    {  // Captain Toad: a punch-hole or notch camera (runtime/ct_touch_menu.cpp, WwhdActivity.java)\n'
+     '        int cutout = ct_touch::cutout_clear() ? 1 : 0;\n'
+     '        if (combo("Camera cutout", &cutout, "Use the area\\0Keep clear (black bar)\\0"))\n'
+     '            hostui::post([cutout] { ct_touch::set_cutout_clear(cutout != 0); });\n'
+     '        help("For phones with a punch-hole or notch camera at the edge of the screen. Use the area draws up to\\n"\n'
+     '             "the edge, around the camera; Keep clear leaves a black bar along the camera\'s edge. Full screen only.");\n'
+     '    }\n'
+     '#endif  // Captain Toad camera cutout\n'),
     # Android: how opaque the on-screen controls are (runtime/ct_touch_menu.cpp)
     ('            hostui::set("touchControls", v ? "1" : "0");\n        });\n#endif\n',
      '            hostui::set("touchControls", v ? "1" : "0");\n        });\n'
@@ -963,7 +972,14 @@ REPLACEMENTS[_touch] = [
      '    private static native void nativeOpenSettings();\n'
      '    private static native void nativeCheat(int which);\n'
      '    private static native float nativeOpacity();\n'
-     '    private static native void nativeSetOpacity(float opacity);\n'),
+     '    private static native void nativeSetOpacity(float opacity);\n'
+     '    private static native boolean nativeCutoutClear();\n'
+     '    private static volatile boolean cutoutClear;  // Settings > Display > Camera cutout: Keep clear\n'
+     '    // for WwhdActivity\'s window layout: false (use the area) until libmain.so is loaded\n'
+     '    static boolean cutoutClear() {\n'
+     '        try { cutoutClear = nativeCutoutClear(); } catch (UnsatisfiedLinkError ignored) {}\n'
+     '        return cutoutClear;\n'
+     '    }\n'),
     ('    private float lastLx, lastLy, lastRx, lastRy, lastLt, lastRt;\n',
      '    private float lastLx, lastLy, lastRx, lastRy, lastLt, lastRt;\n'
      '    private float opacity = 1f;  // the controls\' (Settings > Display > Touch controls), not the menu button\'s\n'
@@ -997,7 +1013,9 @@ REPLACEMENTS[_touch] = [
     ('            nativeControllerConnected(controller);\n',
      '            nativeControllerConnected(controller);\n'
      '            final float o = nativeOpacity();\n'
-     '            if (o != opacity) { opacity = o; invalidate(); }\n'),
+     '            if (o != opacity) { opacity = o; invalidate(); }\n'
+     '            if (nativeCutoutClear() != cutoutClear && getContext() instanceof WwhdActivity)\n'
+     '                ((WwhdActivity) getContext()).cutoutChanged();  // reads it again\n'),
     ('    @Override public void onWindowFocusChanged(boolean hasFocus) {\n',
      """    // ---- Captain Toad's menu (CaptainToadRecomp tools/patch_runtime.py, runtime/ct_touch_menu.cpp)
     private static final int[] CHEATS = {1, 2, 4, 8, 16, 32, 64};  // runtime/ct_save.h, as R.array.ct_cheats lists them
@@ -1103,6 +1121,58 @@ REPLACEMENTS['../android/app/src/main/res/values/strings.xml'] += [
     </string-array>
 </resources>
 """),
+]
+# Android: Settings > Display > Camera cutout. Keep clear lays the window out beside a punch-hole or notch
+# camera (a black bar along that edge); Use the area keeps the reference's layout into it.
+REPLACEMENTS['../android/app/src/main/java/org/wwhdrecomp/wwhd/WwhdActivity.java'] = [
+    ('            if (lp.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES &&\n',
+     '            if (TouchControls.cutoutClear()) {\n'
+     '                // Captain Toad: Settings > Display > Camera cutout > Keep clear (CaptainToadRecomp)\n'
+     '                if (lp.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER) {\n'
+     '                    lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER;\n'
+     '                    w.setAttributes(lp);\n'
+     '                }\n'
+     '            } else\n'
+     '            if (lp.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES &&\n'),
+    ('    private final Runnable reapplyFullScreen = this::applyFullScreen;\n',
+     '    private final Runnable reapplyFullScreen = this::applyFullScreen;\n'
+     '    // Captain Toad: the camera cutout setting changed (TouchControls polls it)\n'
+     '    void cutoutChanged() { applyFullScreen(); }\n'),
+]
+# Gyro controllers (macOS, Windows, Linux): the reference's Controller gyro source (SDL3 sensors; the
+# AppKit host's GameController.framework) and Cemuhook (DSU) move the virtual GamePad as on Android.
+# Desktop builds start with Controller gyro, which does nothing until a controller with motion sensors
+# is connected; a saved choice and WWHD_GYRO still win. The mouse source waits for Wind Waker HD's
+# aiming hooks, so Captain Toad leaves it out, and the dialog describes Captain Toad.
+REPLACEMENTS['src/motion/motion.h'] = [
+    ('    int source = kOff;\n',
+     '#if defined(CT_FOREIGN_GUEST) && !defined(__ANDROID__)\n'
+     '    int source = kController;  // Captain Toad on desktops: a controller\'s gyro moves the GamePad\n'
+     '#else\n'
+     '    int source = kOff;\n'
+     '#endif\n'),
+]
+REPLACEMENTS['src/overlay/gyro_popup.h'] = [
+    ('    note("On the Wii U you aim in first person (bow, hookshot, boomerang, telescope, Picto Box, grappling hook) by "\n'
+     '         "moving the GamePad. This works with the GamePad and the Pro Controller choice alike. The game\'s own "\n'
+     '         "Options > Gyro switch still decides whether it uses the motion, and it ignores the motion while the right "\n'
+     '         "stick is pushed.");\n',
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    note("Captain Toad reads the Wii U GamePad\'s motion: moving the GamePad turns the camera where the game "\n'
+     '         "allows it, such as the first-person views. Controller gyro takes that motion from a controller\'s own "\n'
+     '         "sensors (DualSense, DualShock 4, Switch Pro Controller, Joy-Con, Steam Deck and others), Cemuhook "\n'
+     '         "from a DSU server app.");\n'
+     '#else\n'
+     '    note("On the Wii U you aim in first person (bow, hookshot, boomerang, telescope, Picto Box, grappling hook) by "\n'
+     '         "moving the GamePad. This works with the GamePad and the Pro Controller choice alike. The game\'s own "\n'
+     '         "Options > Gyro switch still decides whether it uses the motion, and it ignores the motion while the right "\n'
+     '         "stick is pushed.");\n'
+     '#endif\n'),
+    ('    for (int i = 0; i < motion::kSourceCount; i++)\n',
+     '    for (int i = 0; i < motion::kSourceCount; i++)\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '        if (i != motion::kMouse || g.source == motion::kMouse)  // it waits for Wind Waker HD\'s aiming\n'
+     '#endif\n'),
 ]
 # Exports that read state private to a reference source file are appended to that file.
 APPENDS = {
