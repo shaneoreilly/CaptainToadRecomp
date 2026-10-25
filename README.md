@@ -172,6 +172,8 @@ Metal is the default renderer. Choose Vulkan with *Graphics > Renderer*. Dynamic
 
 The *Gameplay* menu and the settings overlay's *Cheats* edit the save (`save/user/GameData.bin`, kept as `GameData.bin.before-cheats` before the first cheat) and restart the game: unlock every episode and course, clear every course, every Super Gem, every bonus objective, every challenge time, every Pixel Toad and 100% completion. The course list comes from the game's `content/SystemData/StageList.szs`; the save layout follows the CTSe save editor's description. Clearing episode 3's final course also marks the ending as seen, as the game does after the credits: a save with that course cleared and the ending unseen makes the episode book fail.
 
+Settings > Display > Window size gives the TV window 1280x720, 1600x900, 1920x1080, 2560x1440 or 3840x2160 pixels inside, the sizes that fit its screen (macOS and Windows, out of full screen). With the Vulkan renderer, Settings > Graphics > Internal resolution > *Screen* draws the game with as many pixels as its window shows. Neither has been tested on a Mac or a Windows PC yet.
+
 In the TV window, the picture-in-picture GamePad (Display > GamePad screen > Picture in picture) can be moved by dragging it with the right mouse button or with Option held, resized by dragging its bottom-right corner the same way or by scrolling over it; the placement is saved. A plain click on it stays a GamePad touch.
 
 ## Build the Android test APK
@@ -192,7 +194,11 @@ tools/build_game_android.sh
 tools/run_game_android.sh --push-game --serial <adb serial>   # --push-save copies your save too
 ```
 
-Tested on a Pixel 9 Pro XL (Tensor G4, Mali-G715, Android 17): the title screen, menus and levels run at about 60 fps through Vulkan. On Android the phone's screen starts as the GamePad, so a touch anywhere on the picture is a GamePad touch; the view button in the top left cycles GamePad only, TV with the GamePad in a corner and TV only, and touches on the TV picture touch the GamePad at the same place (the TV shows the GamePad's picture in this game). The tilt button below the touch controls' button turns the phone's gyro on or off for the camera (Settings > Controls > Gyro, "device"). Android's Back gesture opens Settings. Long-press the app icon to export or import the save (`user/GameData.bin`).
+Tested on a Pixel 9 Pro XL (Tensor G4, Mali-G715, Android 17): the title screen, menus and levels run at about 60 fps through Vulkan. On Android the phone's screen starts as the GamePad, so a touch anywhere on the picture is a GamePad touch, and touches on the TV picture touch the GamePad at the same place (the TV shows the GamePad's picture in this game). Android's Back gesture opens Settings. Long-press the app icon to export or import the save (`user/GameData.bin`).
+
+The game files and the save live in the app's own folder, `Android/data/org.ctrecomp.captaintoad/files` (`game/`, `save/`, `config/`), which Android deletes with the app; nothing in the app writes elsewhere except a save you export to Downloads. Android's app backup keeps the save and `settings.ini` (`data_extraction_rules.xml`), so they can come back when the app is installed again.
+
+Not yet tested on a phone (built and compile-checked only): one menu button (☰) in the top left corner replaces the view button, the touch controls' show/hide button and the tilt button. Its menu opens Settings, switches the view (GamePad only, TV with the GamePad in a corner, TV only), shows or hides the touch controls, moves and resizes them (a long press on the button does too), sets their opacity, turns the phone's gyro camera on or off (Settings > Controls > Gyro, "device") and applies the save cheats; on Android a cheat closes the game, and the next start plays with it. Settings > Display > Touch controls has the same opacity. The internal resolution starts at *Screen* on Android: the picture on screen is drawn with as many pixels as it covers on the phone's display (Settings > Graphics; dynamic resolution still lowers it when the GPU cannot keep up).
 
 ## Next step: stream-out output, a longer playthrough and Android
 

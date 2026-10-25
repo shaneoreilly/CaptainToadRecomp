@@ -1,9 +1,11 @@
-// Captain Toad cheats (Gameplay menu, Settings > Cheats). tools/patch_runtime.py puts this file in
-// place of the reference's mods/cheats.cpp, whose cheats edit Wind Waker HD's live save data.
+// Captain Toad cheats (Gameplay menu, Settings > Cheats, Android's menu button). tools/patch_runtime.py
+// puts this file in place of the reference's mods/cheats.cpp, whose cheats edit Wind Waker HD's live
+// save data.
 //
 // The game reads GameData.bin when it starts, so a cheat edits that file (ct_save.h) and restarts the
-// game: progress since the game last saved is lost, as the menu says. The file before the first cheat
-// of a run is kept as GameData.bin.before-cheats. The course table comes from the player's own game
+// game (on Android, where the app cannot relaunch itself, closes it): progress since the game last saved
+// is lost, as the menu says. The file before the first cheat of a run is kept as
+// GameData.bin.before-cheats. The course table comes from the player's own game
 // (content/SystemData/StageList.szs).
 //
 // The reference's live switches (infinite health, magic and the like, the moon jump) read Wind Waker HD
@@ -139,7 +141,12 @@ void request_cheat(int which) {
     // runs on the main thread either way.
     hostui::post([which] {
         if (!edit_save(which)) return;
+#ifdef __ANDROID__
+        // the app cannot relaunch itself: it closes, and the next start reads the edited save
+        hostui::quit();
+#else
         if (!render::restart()) ss::notice(std::string("Cheats: ") + name(which) + " saved; restart Captain Toad to load it");
+#endif
     });
 }
 

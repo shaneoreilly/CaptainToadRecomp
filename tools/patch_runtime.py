@@ -201,7 +201,7 @@ REPLACEMENTS['src/gfx/menu.mm'] = [
          '    }\n')),
 ]
 REPLACEMENTS['src/overlay/overlay.cpp'] = [
-    ('#include "../mods/mods.h"\n', '#include "../mods/mods.h"\n#include "../mods/ct_save.h"\n'),
+    ('#include "../mods/mods.h"\n', '#include "../mods/mods.h"\n#include "../mods/ct_save.h"\n#include "../ct_touch_menu.h"\n'),
     (('void cheats() {\n'
          '    bool v;\n'
          '    note("Save in the game to keep them.");\n'
@@ -237,8 +237,13 @@ REPLACEMENTS['src/overlay/overlay.cpp'] = [
          '    story("Small key", mods::kCheatKey);\n'
          '}\n'),
      ('void cheats() {\n'
+         '#ifdef __ANDROID__\n'
+         '    note("Each cheat changes the save and closes the game: open it again to play with it. Play since the game "\n'
+         '         "last saved is lost. The save before the first cheat is kept as GameData.bin.before-cheats.");\n'
+         '#else\n'
          '    note("Each cheat changes the save and restarts the game: play since the game last saved is lost. "\n'
          '         "The save before the first cheat is kept as GameData.bin.before-cheats.");\n'
+         '#endif\n'
          '    auto cheat = [first = true](const char* label, int which) mutable {\n'
          '        if (!first) modsui::same_line_if_fits(label);\n'
          '        first = false;\n'
@@ -310,29 +315,10 @@ REPLACEMENTS['src/gfx/display_modes.cpp'] = [
      '    float x = (nx * g_tv_dw - L.pip.x) / L.pip.w, y = (ny * g_tv_dh - L.pip.y) / L.pip.h;\n'
      '#endif  // Captain Toad TV touch\n'
      '    if (!clamp_outside && (x < 0 || x > 1 || y < 0 || y > 1)) return false;\n'),
-    # The tilt button under the view button (Android): the phone's own gyro on or off, as
-    # Settings > Controls > Gyro's "device" source
-    ('#include "../aspect.h"\n', '#include "../aspect.h"\n#include "../motion/motion.h"\n'),
-    ('    g_button=p.button;\n', '    g_button=p.button;\n    g_tilt_button=p.tilt_button;\n'),
-    ('static Box g_button;\n', 'static Box g_button, g_tilt_button;\n'),
-    ('bool view_button_hit(float nx, float ny) {\n',
-     'bool tilt_button_hit(float nx, float ny) {\n'
-     '    std::lock_guard<std::mutex> lk(g_layout_mu);\n'
-     '    const float x = nx * g_tv_dw, y = ny * g_tv_dh;\n'
-     '    const Box& b = g_tilt_button;\n'
-     '    return b.w > 0 && x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h;\n'
-     '}\n'
-     'bool view_button_hit(float nx, float ny) {\n'),
-    ('    if (!g_pip_preview && view_button_enabled()) p.button = view_button(dw, dh);\n',
-     '    if (!g_pip_preview && view_button_enabled()) p.button = view_button(dw, dh);\n'
-     '#if defined(CT_FOREIGN_GUEST) && defined(__ANDROID__)\n'
-     '    if (p.button.w > 0) {\n'
-     '        p.tilt_button = p.button;\n'
-     '        // below the touch controls show/hide button (TouchControls.java: 0.125..0.205 of the short side)\n'
-     '        p.tilt_button.y = p.button.y + p.button.h * 2.3f;\n'
-     '        p.tilt_on = motion::settings().source == motion::kDevice;\n'
-     '    }\n'
-     '#endif  // Captain Toad tilt button\n'),
+    # Android: one menu button (TouchControls.java, runtime/ct_touch_menu.cpp) replaces the view button,
+    # the touch controls' show/hide button and the tilt button; WWHD_VIEW_BUTTON=1 still shows the view button.
+    ('#ifdef __ANDROID__\n        return !e || atoi(e) != 0;\n#else\n',
+     '#if defined(__ANDROID__) && !defined(CT_FOREIGN_GUEST)\n        return !e || atoi(e) != 0;\n#else\n'),
     ('bool overlay_hit(float nx, float ny, float* tx, float* ty, bool clamp_outside) {\n',
      '// ---- the picture-in-picture GamePad moved and resized with the pointer (display_modes.h)\n'
      'static int g_pip_drag = 0;  // 0 none, 1 move, 2 resize\n'
@@ -459,16 +445,7 @@ REPLACEMENTS['src/gfx/display.mm'] = [
     if ([self pipEnd]) return;
     if (!self.touching) return;'''),
 ]
-REPLACEMENTS['src/gfx/display.h'] = [
-    ('    int button_dot = 0;        // the host\'s state dot on the button: 0 none, 1 on (green), 2 paused (yellow)\n',
-     '    int button_dot = 0;        // the host\'s state dot on the button: 0 none, 1 on (green), 2 paused (yellow)\n'
-     '    Box tilt_button;           // Captain Toad on Android: the tilt (phone gyro) button, under the view button\n'
-     '    bool tilt_on = false;      // the phone\'s gyro moves the GamePad\n'),
-]
 REPLACEMENTS['src/gfx/display_modes.h'] = [
-    ('bool view_button_hit(float nx, float ny);',
-     'bool tilt_button_hit(float nx, float ny);  // the same for the tilt button (Captain Toad, Android)\n'
-     'bool view_button_hit(float nx, float ny);'),
     ('void pip_set_position(PipPosition position);\n',
      'void pip_set_position(PipPosition position);\n'
      '// Pointer gestures on the picture-in-picture GamePad in the TV window (0..1 from the top left):\n'
@@ -480,67 +457,6 @@ REPLACEMENTS['src/gfx/display_modes.h'] = [
      'void pip_drag_move(float nx, float ny);\n'
      'bool pip_drag_end();\n'
      'bool pip_wheel(float nx, float ny, float steps);\n'),
-]
-REPLACEMENTS['src/gfx/vulkan/present.cpp'] = [
-    ('    d.box={t.x+t.w*0.72f,t.y+t.h*0.06f,t.w*0.22f,t.h*0.22f};quads.push_back(d);\n   }\n  }\n',
-     '    d.box={t.x+t.w*0.72f,t.y+t.h*0.06f,t.w*0.22f,t.h*0.22f};quads.push_back(d);\n   }\n  }\n'
-     '  if(p.tilt_button.w>0) {\n'
-     '   // the tilt button: a phone between two motion marks, its dot green while the gyro is on\n'
-     '   const gfx::Box& t=p.tilt_button;\n'
-     '   ComposeQuad b;b.solid=true;b.color[3]=0.45f;b.box={t.x,t.y,t.w,t.h};quads.push_back(b);\n'
-     '   ComposeQuad ph;ph.solid=true;ph.color[0]=ph.color[1]=ph.color[2]=0.9f;ph.color[3]=0.8f;\n'
-     '   ph.box={t.x+t.w*0.36f,t.y+t.h*0.2f,t.w*0.28f,t.h*0.6f};quads.push_back(ph);\n'
-     '   for(int i=0;i<2;i++) {\n'
-     '    ComposeQuad m;m.solid=true;m.color[0]=m.color[1]=m.color[2]=0.9f;m.color[3]=0.6f;\n'
-     '    m.box={t.x+t.w*(i?0.75f:0.17f),t.y+t.h*0.35f,t.w*0.08f,t.h*0.3f};quads.push_back(m);\n'
-     '   }\n'
-     '   const bool on=p.tilt_on;\n'
-     '   ComposeQuad d;d.solid=true;d.color[0]=on?0.2f:0.6f;d.color[1]=on?0.85f:0.6f;d.color[2]=on?0.3f:0.6f;d.color[3]=0.95f;\n'
-     '   d.box={t.x+t.w*0.72f,t.y+t.h*0.06f,t.w*0.22f,t.h*0.22f};quads.push_back(d);\n'
-     '  }\n'),
-]
-REPLACEMENTS['src/gfx/vulkan/backend.cpp'] = [
-    ('#include "overlay/hostui.h"\n', '#include "overlay/hostui.h"\n#include "motion/motion.h"\n'),
-    ('static SDL_FingerID touchFinger = 0, buttonFinger = 0;  // 0: none\n',
-     'static SDL_FingerID touchFinger = 0, buttonFinger = 0;  // 0: none\n'
-     '#ifdef CT_FOREIGN_GUEST\n'
-     '// The tilt button (display_modes.h): the phone\'s gyro on or off, saved as Settings > Controls > Gyro\n'
-     'static SDL_FingerID tiltFinger = 0;\n'
-     'static void tilt_button_released() {\n'
-     '  motion::Settings g = motion::settings();\n'
-     '  g.source = g.source == motion::kDevice ? motion::kOff : motion::kDevice;\n'
-     '  if (g.source == motion::kDevice && g.tuning.sensitivity_x == motion::Tuning::kDefaultSensitivity &&\n'
-     '      g.tuning.sensitivity_y == motion::Tuning::kDefaultSensitivity)\n'
-     '    g.tuning.sensitivity_x = g.tuning.sensitivity_y = motion::default_sensitivity(motion::kDevice);\n'
-     '  LOG("[gyro] tilt button: phone gyro %s", g.source == motion::kDevice ? "on" : "off");\n'
-     '  ::hostui::post([g] {\n'
-     '    motion::set_settings(g);\n'
-     '    for (const char* k : motion::kKeys) ::hostui::set(k, motion::value_of(g, k));\n'
-     '  });\n'
-     '}\n'
-     '#endif  // Captain Toad tilt button\n'),
-    ('    if (!dual && !buttonFinger && gfx::view_button_hit(f.x, f.y)) {\n',
-     '#ifdef CT_FOREIGN_GUEST\n'
-     '    if (!dual && !tiltFinger && gfx::tilt_button_hit(f.x, f.y)) {\n'
-     '      tiltFinger = f.fingerID;\n'
-     '      return true;\n'
-     '    }\n'
-     '#endif  // Captain Toad tilt button\n'
-     '    if (!dual && !buttonFinger && gfx::view_button_hit(f.x, f.y)) {\n'),
-    ('    if (!touchFinger || f.fingerID != touchFinger) return f.fingerID == buttonFinger && buttonFinger;\n',
-     '#ifdef CT_FOREIGN_GUEST\n'
-     '    if (tiltFinger && f.fingerID == tiltFinger) return true;\n'
-     '#endif  // Captain Toad tilt button\n'
-     '    if (!touchFinger || f.fingerID != touchFinger) return f.fingerID == buttonFinger && buttonFinger;\n'),
-    ('    if (buttonFinger && f.fingerID == buttonFinger) {\n      buttonFinger = 0;\n',
-     '#ifdef CT_FOREIGN_GUEST\n'
-     '    if (tiltFinger && f.fingerID == tiltFinger) {\n'
-     '      tiltFinger = 0;\n'
-     '      if (event.type == SDL_EVENT_FINGER_UP) tilt_button_released();\n'
-     '      return true;\n'
-     '    }\n'
-     '#endif  // Captain Toad tilt button\n'
-     '    if (buttonFinger && f.fingerID == buttonFinger) {\n      buttonFinger = 0;\n'),
 ]
 REPLACEMENTS['src/gfx/gamepad_ui_state.cpp'] = [
     ('void display_read_gamepad_ui() {\n    if (!display_gamepad_state_needed()) return;\n',
@@ -843,6 +759,351 @@ REPLACEMENTS['src/gfx/menu.mm'] += [
     ('    [gp addItem:[NSMenuItem separatorItem]];\n    [gp addItemWithTitle:@"Cheats (',
      '    [gp addItem:[NSMenuItem separatorItem]];\n' + _ct_end + '    [gp addItemWithTitle:@"Cheats ('),
 ]
+# Internal resolution "Screen" (Vulkan): 0 asks for the factor that draws the picture on screen (the
+# 1280x720 TV picture, or the 854x480 GamePad picture in GamePad-only mode) with as many pixels as it
+# covers in the TV window (in steps of 1/16), so a phone draws at its panel's resolution. Captain Toad on
+# Android starts with it; a saved choice and WWHD_RES_SCALE still win.
+REPLACEMENTS['src/gfx/display_modes.h'] += [
+    ('bool main_picture(float* x, float* y, float* w, float* h);\n',
+     'bool main_picture(float* x, float* y, float* w, float* h);\n'
+     'bool main_picture_is_gamepad();  // that picture is the GamePad\'s (Captain Toad screen resolution)\n'),
+]
+REPLACEMENTS['src/gfx/display_modes.cpp'] += [
+    ('// ---------------------------------------------------------------- view button (touch screens)\n',
+     'bool main_picture_is_gamepad() {\n'
+     '    std::lock_guard<std::mutex> lk(g_layout_mu);\n'
+     '    return g_tv_layout.drc_only;\n'
+     '}\n'
+     '\n'
+     '// ---------------------------------------------------------------- view button (touch screens)\n'),
+]
+REPLACEMENTS['src/gfx/vulkan/surfaces.cpp'] += [
+    ('#include "dynres.h"\n', '#include "dynres.h"\n#include "../display_modes.h"\n'),
+    # before the first frame's latch: 1x, never 0
+    ('static float g_res_frame = g_res_requested.load();  // render thread: the factor for this frame\n',
+     'static float g_res_frame = std::max(g_res_requested.load(), 1.0f);  // render thread: the factor for this frame\n'),
+    ('static float parse_scale(const char* e) {\n    float f = e ? (float)atof(e) : 1.0f;\n',
+     'static float parse_scale(const char* e) {\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '#ifdef __ANDROID__\n'
+     '    if (!e) return 0.0f;  // the screen\'s own resolution\n'
+     '#endif\n'
+     '    if (e && atof(e) == 0) return 0.0f;\n'
+     '#endif  // Captain Toad screen resolution\n'
+     '    float f = e ? (float)atof(e) : 1.0f;\n'),
+    ('void set_res_scale(float f) {\n    g_res_requested = std::clamp(std::isfinite(f) ? f : 1.0f, 1.0f, 4.0f);\n',
+     'void set_res_scale(float f) {\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if (f == 0) {\n'
+     '        g_res_requested = 0;\n'
+     '        LOG("[gfx] internal resolution: the screen\'s");\n'
+     '        return;\n'
+     '    }\n'
+     '#endif  // Captain Toad screen resolution\n'
+     '    g_res_requested = std::clamp(std::isfinite(f) ? f : 1.0f, 1.0f, 4.0f);\n'),
+    ('void latch_res_scale() {\n',
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '// the factor that draws the picture on screen (TV 720 lines, GamePad 480) with the TV window\'s pixels\n'
+     '// it covers, in steps of 1/16 so that resizing a window does not make new render targets every pixel\n'
+     'static float screen_res_scale() {\n'
+     '    float x, y, w, h;\n'
+     '    const float pixels = float(R.tv.swapExtent.height);\n'
+     '    if (pixels <= 0 || !gfx::main_picture(&x, &y, &w, &h)) return 1.0f;\n'
+     '    const float lines = gfx::main_picture_is_gamepad() ? 480.0f : 720.0f;\n'
+     '    return std::clamp(std::round(h * pixels / lines * 16.0f) / 16.0f, 1.0f, 4.0f);\n'
+     '}\n'
+     '#endif  // Captain Toad screen resolution\n'
+     'void latch_res_scale() {\n'),
+    ('    g_res_frame = g_res_requested.load(std::memory_order_relaxed);\n    latch_aspect();\n',
+     '    g_res_frame = g_res_requested.load(std::memory_order_relaxed);\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if (g_res_frame == 0) g_res_frame = screen_res_scale();\n'
+     '#endif  // Captain Toad screen resolution\n'
+     '    latch_aspect();\n'),
+]
+REPLACEMENTS['src/gfx/vulkan/backend.cpp'] = [
+    # the window title names the factor in use
+    ('          double(requested_res_scale()), fxaa_enabled() ? " · FXAA" : "");\n',
+     '          double(requested_res_scale() > 0 ? requested_res_scale() : res_scale()), fxaa_enabled() ? " · FXAA" : "");\n'),
+]
+REPLACEMENTS['src/overlay/overlay.cpp'] += [
+    ('        if (radio(names[i], std::fabs(cur - s) < 0.01f)) post_changed([s] { hostui::set_res_scale(s); });\n    }\n',
+     '        if (radio(names[i], std::fabs(cur - s) < 0.01f)) post_changed([s] { hostui::set_res_scale(s); });\n    }\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if (!strcmp(hostui::name(), "SDL")) {  // Vulkan: 0 follows the window (gfx/vulkan/surfaces.cpp)\n'
+     '        flow::next(flow::check("Screen"));\n'
+     '        if (radio("Screen", cur == 0)) post_changed([] { hostui::set_res_scale(0); });\n'
+     '        help("Screen draws the game at the resolution of your screen, or of the game\'s window: as many pixels\\n"\n'
+     '             "as the picture covers, up to 4x.");\n'
+     '    }\n'
+     '#endif  // Captain Toad screen resolution\n'),
+    ('        ImGui::TextDisabled("%s  %gx  %s", render::api_name(render::active()), hostui::res_scale(), interp::mode_name());\n',
+     '        if (hostui::res_scale() == 0)  // Captain Toad: the screen\'s resolution\n'
+     '            ImGui::TextDisabled("%s  screen  %s", render::api_name(render::active()), interp::mode_name());\n'
+     '        else\n'
+     '        ImGui::TextDisabled("%s  %gx  %s", render::api_name(render::active()), hostui::res_scale(), interp::mode_name());\n'),
+    # Window sizes (desktop): the TV window with this many pixels inside, those that fit its screen
+    ('                                           : "The TV window (F11 or Alt+Enter); remembered for the next start");\n#endif\n',
+     '                                           : "The TV window (F11 or Alt+Enter); remembered for the next start");\n#endif\n'
+     '#ifndef __ANDROID__\n'
+     '    {  // Captain Toad: window sizes (CaptainToadRecomp tools/patch_runtime.py)\n'
+     '        static const int sizes[][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3840, 2160}};\n'
+     '        int ww = 0, wh = 0;\n'
+     '        hostui::window_size(ww, wh);\n'
+     '        const bool windowed = !hostui::fullscreen();\n'
+     '        ImGui::TextUnformatted("Window size");\n'
+     '        bool first = true;\n'
+     '        for (const auto& size : sizes) {\n'
+     '            const int w = size[0], h = size[1];\n'
+     '            if (!hostui::window_size_fits(w, h)) continue;\n'
+     '            char label[32];\n'
+     '            snprintf(label, sizeof label, "%dx%d##windowSize", w, h);\n'
+     '            if (!first) flow::next(flow::check(label));\n'
+     '            first = false;\n'
+     '            if (radio(label, ww == w && wh == h, windowed)) hostui::post([w, h] { hostui::set_window_size(w, h); });\n'
+     '        }\n'
+     '        help(windowed ? "The game\'s window, in pixels inside it: the sizes that fit this screen. Drag the window\'s\\n"\n'
+     '                        "edge for any other size."\n'
+     '                      : "Leave full screen to choose a window size.");\n'
+     '    }\n'
+     '#endif  // Captain Toad window sizes\n'),
+    # Android: how opaque the on-screen controls are (runtime/ct_touch_menu.cpp)
+    ('            hostui::set("touchControls", v ? "1" : "0");\n        });\n#endif\n',
+     '            hostui::set("touchControls", v ? "1" : "0");\n        });\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    pip_percent("Controls opacity (%)", ct_touch::opacity(), ct_touch::kOpacityMin, 1.0f, ct_touch::set_opacity);\n'
+     '    help("How opaque the on-screen controls are drawn. The menu button (top left) sets it too.");\n'
+     '#endif  // Captain Toad touch controls opacity\n'
+     '#endif\n'),
+]
+REPLACEMENTS['src/overlay/hostui.h'] = [
+    ('void set_fullscreen(bool on);\n',
+     'void set_fullscreen(bool on);\n'
+     '// Captain Toad (CaptainToadRecomp tools/patch_runtime.py): the TV window\'s size in pixels inside it, for\n'
+     '// Settings > Display > Window size on desktop hosts\n'
+     'void window_size(int& w, int& h);      // 0x0 when unknown\n'
+     'bool window_size_fits(int w, int h);   // a window with this many pixels inside fits the TV window\'s screen\n'
+     'void set_window_size(int w, int h);    // main thread; in a window only (full screen: nothing changes)\n'),
+]
+REPLACEMENTS['src/gfx/vulkan/overlay_sdl.cpp'] = [
+    ('bool fullscreen() { return gfxvk::R.tv.window && (SDL_GetWindowFlags(gfxvk::R.tv.window) & SDL_WINDOW_FULLSCREEN); }\n',
+     'bool fullscreen() { return gfxvk::R.tv.window && (SDL_GetWindowFlags(gfxvk::R.tv.window) & SDL_WINDOW_FULLSCREEN); }\n'
+     '// Captain Toad window sizes: SDL sizes windows in its own units, the menu in pixels\n'
+     'void window_size(int& w, int& h) {\n'
+     '    w = h = 0;\n'
+     '    if (SDL_Window* win = gfxvk::R.tv.window) SDL_GetWindowSizeInPixels(win, &w, &h);\n'
+     '}\n'
+     'bool window_size_fits(int w, int h) {\n'
+     '    SDL_Window* win = gfxvk::R.tv.window;\n'
+     '    SDL_Rect r{};\n'
+     '    if (!win || !SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(win), &r)) return false;\n'
+     '    const float density = std::max(SDL_GetWindowPixelDensity(win), 0.1f);\n'
+     '    return w / density <= r.w && h / density <= r.h;\n'
+     '}\n'
+     'void set_window_size(int w, int h) {\n'
+     '    SDL_Window* win = gfxvk::R.tv.window;\n'
+     '    if (!win || fullscreen()) return;\n'
+     '    const float density = std::max(SDL_GetWindowPixelDensity(win), 0.1f);\n'
+     '    if (!SDL_SetWindowSize(win, int(w / density + 0.5f), int(h / density + 0.5f)))\n'
+     '        LOG("[display] TV window: size %dx%d failed: %s", w, h, SDL_GetError());\n'
+     '    else\n'
+     '        LOG("[display] TV window: %dx%d pixels inside", w, h);\n'
+     '}\n'),
+]
+REPLACEMENTS['src/gfx/overlay_appkit.mm'] = [
+    ('void set_fullscreen(bool on) { gfx::display_set_tv_fullscreen(on); }\n',
+     'void set_fullscreen(bool on) { gfx::display_set_tv_fullscreen(on); }\n'
+     '// Captain Toad window sizes: AppKit sizes windows in points, the menu in pixels\n'
+     'void window_size(int& w, int& h) {\n'
+     '    w = h = 0;\n'
+     '    NSWindow* win = (__bridge NSWindow*)gfx::display_tv_window();\n'
+     '    if (!win) return;\n'
+     '    const NSRect r = [win convertRectToBacking:[win contentRectForFrameRect:win.frame]];\n'
+     '    w = int(r.size.width + 0.5);\n'
+     '    h = int(r.size.height + 0.5);\n'
+     '}\n'
+     'bool window_size_fits(int w, int h) {\n'
+     '    NSWindow* win = (__bridge NSWindow*)gfx::display_tv_window();\n'
+     '    NSScreen* screen = win.screen ?: NSScreen.mainScreen;\n'
+     '    if (!win || !screen) return false;\n'
+     '    const CGFloat scale = screen.backingScaleFactor;\n'
+     '    const NSSize frame = [win frameRectForContentRect:NSMakeRect(0, 0, w / scale, h / scale)].size;\n'
+     '    return frame.width <= screen.visibleFrame.size.width && frame.height <= screen.visibleFrame.size.height;\n'
+     '}\n'
+     'void set_window_size(int w, int h) {\n'
+     '    NSWindow* win = (__bridge NSWindow*)gfx::display_tv_window();\n'
+     '    if (!win || gfx::tv_fullscreen()) return;\n'
+     '    const CGFloat scale = win.backingScaleFactor;\n'
+     '    // the top left corner stays where it is, unless the window would leave the screen\n'
+     '    NSRect frame = [win frameRectForContentRect:NSMakeRect(0, 0, w / scale, h / scale)];\n'
+     '    frame.origin = NSMakePoint(NSMinX(win.frame), NSMaxY(win.frame) - frame.size.height);\n'
+     '    [win setFrame:[win constrainFrameRect:frame toScreen:win.screen] display:YES];\n'
+     '    LOG("[display] TV window: %dx%d pixels inside", w, h);\n'
+     '}\n'),
+]
+# Android: one menu button in the top left corner (where the reference has its view button) in place of
+# the view button, the touch controls' show/hide button and the tilt button. Its menu (an Android dialog)
+# switches the view, shows or hides the touch controls, edits their layout, sets their opacity, turns
+# the phone's gyro on or off, applies the save cheats and opens the settings window
+# (runtime/ct_touch_menu.cpp). A long press still edits the layout. The controls are drawn with the
+# opacity of Settings > Display > Touch controls; the menu button keeps the reference's look.
+_touch = '../android/app/src/main/java/org/wwhdrecomp/wwhd/TouchControls.java'
+REPLACEMENTS[_touch] = [
+    ('// On-screen controls over the game: two sticks, A B X Y, L R ZL ZR, + -, a D-pad, and a small button\n'
+     '// under the view button (top left) that shows or hides them (remembered).',
+     '// On-screen controls over the game: two sticks, A B X Y, L R ZL ZR, + -, a D-pad, and Captain Toad\'s\n'
+     '// menu button (top left; CaptainToadRecomp tools/patch_runtime.py) that shows or hides them (remembered).'),
+    ('    private static native void nativeShowControls(boolean shown);\n',
+     '    private static native void nativeShowControls(boolean shown);\n'
+     '    // Captain Toad\'s menu button (runtime/ct_touch_menu.cpp)\n'
+     '    private static native int nativeMenuState();\n'
+     '    private static native int nativeNextView();\n'
+     '    private static native void nativeSwitchView();\n'
+     '    private static native void nativeToggleTilt();\n'
+     '    private static native void nativeOpenSettings();\n'
+     '    private static native void nativeCheat(int which);\n'
+     '    private static native float nativeOpacity();\n'
+     '    private static native void nativeSetOpacity(float opacity);\n'),
+    ('    private float lastLx, lastLy, lastRx, lastRy, lastLt, lastRt;\n',
+     '    private float lastLx, lastLy, lastRx, lastRy, lastLt, lastRt;\n'
+     '    private float opacity = 1f;  // the controls\' (Settings > Display > Touch controls), not the menu button\'s\n'
+     '    private android.app.AlertDialog menu;\n'),
+    ('        toggle = new Control(KIND_TOGGLE, 0, "🎮", 0f, 0f, 0.04f);  // placed in onSizeChanged\n',
+     '        toggle = new Control(KIND_TOGGLE, 0, "☰", 0f, 0f, 0.045f);  // the menu button, placed in onSizeChanged\n'),
+    ('        // under the game\'s view button (screen_layout.cpp: a square of 9% of the short side, 1.5% from\n'
+     '        // the top left corner)\n'
+     '        toggle.r = toggle.fr * s;\n'
+     '        toggle.cx = s * (0.015f + 0.045f);\n'
+     '        toggle.cy = s * (0.015f + 0.09f + 0.02f) + toggle.r;\n',
+     '        // where the reference has its view button (display_modes.cpp: a square of 9% of the short side,\n'
+     '        // 1.5% from the top left corner)\n'
+     '        toggle.r = toggle.fr * s;\n'
+     '        toggle.cx = toggle.cy = s * (0.015f + 0.045f);\n'),
+    ('        fill.setColor(on ? 0x90FFFFFF : 0x38FFFFFF);\n        edge.setColor(0x80FFFFFF);\n',
+     '        fill.setColor(faded(on ? 0x90FFFFFF : 0x38FFFFFF, c));\n        edge.setColor(faded(0x80FFFFFF, c));\n'),
+    ('            fill.setColor(c.pressed ? 0xB0FFFFFF : 0x70FFFFFF);\n',
+     '            fill.setColor(faded(c.pressed ? 0xB0FFFFFF : 0x70FFFFFF, c));\n'),
+    ('        text.setColor(0xE0FFFFFF);\n', '        text.setColor(faded(0xE0FFFFFF, c));\n'),
+    ('    private Control hit(float x, float y) {\n',
+     '    // a colour with the controls\' opacity (the menu button keeps its own)\n'
+     '    private int faded(int argb, Control c) {\n'
+     '        if (c == toggle || opacity >= 1f) return argb;\n'
+     '        return Math.round((argb >>> 24) * opacity) << 24 | (argb & 0xFFFFFF);\n'
+     '    }\n'
+     '\n'
+     '    private Control hit(float x, float y) {\n'),
+    ('                        if (!all && !longPressConsumed) setShown(toggleTo);\n',
+     '                        if (!all && !longPressConsumed) post(this::showMenu);\n'),
+    ('            nativeControllerConnected(controller);\n',
+     '            nativeControllerConnected(controller);\n'
+     '            final float o = nativeOpacity();\n'
+     '            if (o != opacity) { opacity = o; invalidate(); }\n'),
+    ('    @Override public void onWindowFocusChanged(boolean hasFocus) {\n',
+     """    // ---- Captain Toad's menu (CaptainToadRecomp tools/patch_runtime.py, runtime/ct_touch_menu.cpp)
+    private static final int[] CHEATS = {1, 2, 4, 8, 16, 32, 64};  // runtime/ct_save.h, as R.array.ct_cheats lists them
+    private static final float[] OPACITIES = {1f, 0.75f, 0.5f, 0.25f};
+
+    private void showMenu() {
+        if (menu != null && menu.isShowing()) return;
+        final int state, next;
+        try { state = nativeMenuState(); next = nativeNextView(); }
+        catch (UnsatisfiedLinkError e) { return; }  // libmain.so not loaded yet
+        final Context c = getContext();
+        final String[] views = c.getResources().getStringArray(R.array.ct_views);
+        final int view = state & 15;
+        final boolean tilt = (state & 16) != 0;
+        final String[] items = {
+            c.getString(R.string.ct_menu_settings),
+            c.getString(R.string.ct_menu_view, view < views.length ? views[view] : "", next < views.length ? views[next] : ""),
+            c.getString(shown ? R.string.ct_menu_hide_controls : R.string.ct_menu_show_controls),
+            c.getString(R.string.ct_menu_edit_layout),
+            c.getString(R.string.ct_menu_opacity, Math.round(opacity * 100)),
+            c.getString(tilt ? R.string.ct_menu_tilt_off : R.string.ct_menu_tilt_on),
+            c.getString(R.string.ct_menu_cheats)};
+        show(new android.app.AlertDialog.Builder(c).setTitle(R.string.app_name).setItems(items, (d, which) -> {
+            switch (which) {
+                case 0: nativeOpenSettings(); break;
+                case 1: nativeSwitchView(); break;
+                case 2: setShown(!shown); invalidate(); break;
+                case 3: post(this::beginEditing); break;
+                case 4: post(this::showOpacity); break;
+                case 5: nativeToggleTilt(); break;
+                case 6: post(this::showCheats); break;
+            }
+        }).setNegativeButton(android.R.string.cancel, null));
+    }
+
+    private void showOpacity() {
+        int checked = 0;
+        for (int i = 1; i < OPACITIES.length; i++)
+            if (Math.abs(OPACITIES[i] - opacity) < Math.abs(OPACITIES[checked] - opacity)) checked = i;
+        final String[] names = new String[OPACITIES.length];
+        for (int i = 0; i < names.length; i++) names[i] = Math.round(OPACITIES[i] * 100) + "%";
+        show(new android.app.AlertDialog.Builder(getContext()).setTitle(R.string.ct_menu_opacity_title)
+            .setSingleChoiceItems(names, checked, (d, which) -> {
+                opacity = OPACITIES[which];
+                nativeSetOpacity(opacity);
+                invalidate();
+                d.dismiss();
+            }).setNegativeButton(android.R.string.cancel, null));
+    }
+
+    // each cheat asks first: it changes the save and closes the game (runtime/cheats.cpp)
+    private void showCheats() {
+        final String[] names = getContext().getResources().getStringArray(R.array.ct_cheats);
+        show(new android.app.AlertDialog.Builder(getContext()).setTitle(R.string.ct_menu_cheats_title)
+            .setItems(names, (d, which) -> post(() -> show(new android.app.AlertDialog.Builder(getContext())
+                .setTitle(names[which]).setMessage(R.string.ct_cheat_confirm)
+                .setPositiveButton(R.string.ct_cheat_apply, (d2, w2) -> nativeCheat(CHEATS[which]))
+                .setNegativeButton(android.R.string.cancel, null))))
+            .setNegativeButton(android.R.string.cancel, null));
+    }
+
+    private void show(android.app.AlertDialog.Builder builder) {
+        menu = builder.create();
+        menu.show();
+        WwhdActivity.syncSystemBars(menu.getWindow());  // full screen: the system bars stay hidden
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+"""),
+]
+REPLACEMENTS['../android/app/src/main/res/values/strings.xml'] += [
+    ('</resources>\n', """    <!-- Captain Toad's menu button (CaptainToadRecomp tools/patch_runtime.py) -->
+    <string name="ct_menu_settings">Settings</string>
+    <string name="ct_menu_view">View: %1$s (tap for %2$s)</string>
+    <string name="ct_menu_show_controls">Show touch controls</string>
+    <string name="ct_menu_hide_controls">Hide touch controls</string>
+    <string name="ct_menu_edit_layout">Move and resize touch controls</string>
+    <string name="ct_menu_opacity">Touch controls opacity: %1$d%%</string>
+    <string name="ct_menu_opacity_title">Touch controls opacity</string>
+    <string name="ct_menu_tilt_on">Tilt camera (phone gyro): off, tap to turn on</string>
+    <string name="ct_menu_tilt_off">Tilt camera (phone gyro): on, tap to turn off</string>
+    <string name="ct_menu_cheats">Cheats</string>
+    <string name="ct_menu_cheats_title">Cheats (change your save)</string>
+    <string name="ct_cheat_confirm">Your save is changed and Captain Toad closes: open it again to play with the cheat. Play since the game last saved is lost. The save from before the first cheat is kept as GameData.bin.before-cheats.</string>
+    <string name="ct_cheat_apply">Apply and close</string>
+    <!-- gfx::DrcMode order -->
+    <string-array name="ct_views">
+        <item>separate window</item>
+        <item>picture-in-picture</item>
+        <item>automatic</item>
+        <item>TV only</item>
+        <item>GamePad only</item>
+    </string-array>
+    <!-- runtime/ct_save.h bit order (TouchControls.CHEATS) -->
+    <string-array name="ct_cheats">
+        <item>Unlock every episode and course</item>
+        <item>Clear every course</item>
+        <item>Every Super Gem</item>
+        <item>Every bonus objective</item>
+        <item>Every challenge time</item>
+        <item>Every Pixel Toad</item>
+        <item>100% completion</item>
+    </string-array>
+</resources>
+"""),
+]
 # Exports that read state private to a reference source file are appended to that file.
 APPENDS = {
     'src/hle/ax.cpp': '''
@@ -962,7 +1223,8 @@ void ct_service(Cpu* c) {
 ''',
 }
 # Captain Toad files that replace or join reference files
-for source, relative in (('cheats.cpp', 'src/mods/cheats.cpp'), ('ct_save.h', 'src/mods/ct_save.h')):
+for source, relative in (('cheats.cpp', 'src/mods/cheats.cpp'), ('ct_save.h', 'src/mods/ct_save.h'),
+                         ('ct_touch_menu.cpp', 'src/ct_touch_menu.cpp'), ('ct_touch_menu.h', 'src/ct_touch_menu.h')):
     text = (Path(__file__).resolve().parent.parent / 'runtime' / source).read_text(encoding='utf-8')
     (runtime / relative).write_text(text, encoding='utf-8', newline='\n')
 
