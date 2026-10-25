@@ -832,6 +832,81 @@ REPLACEMENTS['src/gfx/vulkan/surfaces.cpp'] += [
      '#endif  // Captain Toad screen resolution\n'
      '    latch_aspect();\n'),
 ]
+# The same "Screen" resolution with Metal (macOS): the TV window's drawable sets the factor, so GamePad only
+# on a 4K screen draws the GamePad's 854x480 at 4x instead of the 3x that suits the TV's 1280x720. The
+# Graphics menu and Settings > Graphics offer it; it is saved as resScale 0.
+REPLACEMENTS['src/gfx/metal_surfaces.mm'] = REPLACEMENTS.get('src/gfx/metal_surfaces.mm', []) + [
+    ('#include "mods/cemu_pack.h"\n', '#include "mods/cemu_pack.h"\n#include "gfx/display_modes.h"\n'),
+    ('static float parse_scale(const char* e) {\n    float f = e ? (float)atof(e) : 1.0f;\n',
+     'static float parse_scale(const char* e) {\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if (e && atof(e) == 0) return 0.0f;  // the screen\'s resolution\n'
+     '#endif  // Captain Toad screen resolution\n'
+     '    float f = e ? (float)atof(e) : 1.0f;\n'),
+    ('static float g_res_frame = g_res_requested.load();\n',
+     'static float g_res_frame = std::max(g_res_requested.load(), 1.0f);\n'),
+    ('void set_res_scale(float f) {\n    g_res_requested = std::clamp(f, 1.0f, 4.0f);\n',
+     'void set_res_scale(float f) {\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if (f == 0) {\n'
+     '        g_res_requested = 0;\n'
+     '        LOG("[gfx] internal resolution: the screen\'s");\n'
+     '        return;\n'
+     '    }\n'
+     '#endif  // Captain Toad screen resolution\n'
+     '    g_res_requested = std::clamp(f, 1.0f, 4.0f);\n'),
+    ('void latch_res_scale() {\n',
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '// the factor that draws the picture on screen (TV 720 lines, GamePad 480) with the TV window\'s pixels\n'
+     '// it covers, in steps of 1/16 so that resizing a window does not make new render targets every pixel\n'
+     'static float screen_res_scale() {\n'
+     '    float x, y, w, h;\n'
+     '    const float pixels = R.tv.layer ? float(R.tv.layer.drawableSize.height) : 0.0f;\n'
+     '    if (pixels <= 0 || !gfx::main_picture(&x, &y, &w, &h)) return 1.0f;\n'
+     '    const float lines = gfx::main_picture_is_gamepad() ? 480.0f : 720.0f;\n'
+     '    return std::clamp(std::round(h * pixels / lines * 16.0f) / 16.0f, 1.0f, 4.0f);\n'
+     '}\n'
+     '#endif  // Captain Toad screen resolution\n'
+     'void latch_res_scale() {\n'),
+    ('    g_res_frame = g_res_requested.load(std::memory_order_relaxed);\n    latch_aspect();\n',
+     '    g_res_frame = g_res_requested.load(std::memory_order_relaxed);\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if (g_res_frame == 0) {\n'
+     '        g_res_frame = screen_res_scale();\n'
+     '        static float logged = 0;\n'
+     '        if (g_res_frame != logged) LOG("[gfx] screen resolution: %gx", logged = g_res_frame);\n'
+     '    }\n'
+     '#endif  // Captain Toad screen resolution\n'
+     '    latch_aspect();\n'),
+]
+REPLACEMENTS['src/gfx/menu.mm'] += [
+    # -1: nothing chosen in the menu yet (0 is the Screen resolution)
+    ('static float g_res_shown = 0;  // last value set from the UI (res_scale() lags a frame)\n'
+     'static float current_res_scale() { return g_res_shown ? g_res_shown : render::res_scale(); }\n',
+     '#ifdef CT_FOREIGN_GUEST\n'
+     'static float g_res_shown = -1;  // last value set from the UI (res_scale() lags a frame); 0: Screen\n'
+     'static float current_res_scale() { return g_res_shown >= 0 ? g_res_shown : render::res_scale(); }\n'
+     '#else\n'
+     'static float g_res_shown = 0;  // last value set from the UI (res_scale() lags a frame)\n'
+     'static float current_res_scale() { return g_res_shown ? g_res_shown : render::res_scale(); }\n'
+     '#endif  // Captain Toad screen resolution\n'),
+    ('    NSString* res = current_res_scale() != 1.0f ? [NSString stringWithFormat:@" \\u00b7 %gx res", current_res_scale()] : @"";\n',
+     '    NSString* res = current_res_scale() != 1.0f ? [NSString stringWithFormat:@" \\u00b7 %gx res", current_res_scale()] : @"";\n'
+     '    if (current_res_scale() == 0) res = @" \\u00b7 screen res";  // Captain Toad screen resolution\n'),
+    ('- (void)setRes:(NSMenuItem*)item { set_res(kResScales[item.tag]); update_title(); }\n',
+     '- (void)setRes:(NSMenuItem*)item { set_res(kResScales[item.tag]); update_title(); }\n'
+     '- (void)setResScreen:(NSMenuItem*)item { set_res(0); update_title(); }  // Captain Toad screen resolution\n'),
+    ('    if (item.action == @selector(setRes:))\n',
+     '    if (item.action == @selector(setResScreen:))\n'
+     '        item.state = current_res_scale() == 0 ? NSControlStateValueOn : NSControlStateValueOff;\n'
+     '    if (item.action == @selector(setRes:))\n'),
+    ('    add(g, @"    3x (3840x2160)", @selector(setRes:), @"R", 3);\n',
+     '    add(g, @"    3x (3840x2160)", @selector(setRes:), @"R", 3);\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    add(g, @"    Screen (the window\'s pixels)", @selector(setResScreen:), @"", 0).toolTip =\n'
+     '        @"As many pixels as the picture covers in the window, up to 4x: GamePad only on a 4K screen draws at 4x";\n'
+     '#endif  // Captain Toad screen resolution\n'),
+]
 REPLACEMENTS['src/gfx/vulkan/backend.cpp'] = [
     # the window title names the factor in use
     ('          double(requested_res_scale()), fxaa_enabled() ? " · FXAA" : "");\n',
@@ -883,7 +958,7 @@ REPLACEMENTS['src/overlay/overlay.cpp'] += [
     ('        if (radio(names[i], std::fabs(cur - s) < 0.01f)) post_changed([s] { hostui::set_res_scale(s); });\n    }\n',
      '        if (radio(names[i], std::fabs(cur - s) < 0.01f)) post_changed([s] { hostui::set_res_scale(s); });\n    }\n'
      '#ifdef CT_FOREIGN_GUEST\n'
-     '    if (!strcmp(hostui::name(), "SDL")) {  // Vulkan: 0 follows the window (gfx/vulkan/surfaces.cpp)\n'
+     '    {  // 0 follows the window (gfx/metal_surfaces.mm, gfx/vulkan/surfaces.cpp)\n'
      '        flow::next(flow::check("Screen"));\n'
      '        if (radio("Screen", cur == 0)) post_changed([] { hostui::set_res_scale(0); });\n'
      '        help("Screen draws the game at the resolution of your screen, or of the game\'s window: as many pixels\\n"\n'
