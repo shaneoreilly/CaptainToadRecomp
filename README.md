@@ -181,7 +181,16 @@ powershell -ExecutionPolicy Bypass -File tools/build_game_android.ps1 -Cpu oryon
 powershell -ExecutionPolicy Bypass -File tools/run_game_android.ps1 -PushGame
 ```
 
-The scripts default to the SDK in `C:\Android\Sdk`, NDK `30.0.16248370`, CMake `4.1.2` and Android Studio's JDK. They have not been run yet. The APK contains recompiled game code: keep it on your own devices.
+The scripts default to the SDK in `C:\Android\Sdk`, NDK `30.0.16248370`, CMake `4.1.2` and Android Studio's JDK. They have not been run on Windows yet. The APK contains recompiled game code: keep it on your own devices.
+
+On macOS (and Linux), `tools/build_game_android.sh` and `tools/run_game_android.sh` do the same from the code the macOS app generated (`build/game-macos/data/gen` and `game`). They need the Android SDK with platform 36, build tools 35.0.0 and NDK `30.0.16248370` (Android Studio's, or Homebrew's `android-commandlinetools` with `sdkmanager`), a JDK 17 to 21 for Gradle 8.12 (`brew install openjdk@21`), CMake, Ninja and Python 3. Pillow, if installed, makes the launcher icon from your own game's title screen (`android/app/local-res`, never committed). Wireless debugging works: `adb connect <phone address>`, then pass `--serial`:
+
+```sh
+tools/build_game_android.sh
+tools/run_game_android.sh --push-game --serial <adb serial>   # --push-save copies your save too
+```
+
+Tested on a Pixel 9 Pro XL (Tensor G4, Mali-G715, Android 17): the title screen, menus and levels run at about 60 fps through Vulkan. On Android the phone's screen starts as the GamePad, so a touch anywhere on the picture is a GamePad touch; the view button in the top left cycles GamePad only, TV with the GamePad in a corner and TV only, and touches on the TV picture touch the GamePad at the same place (the TV shows the GamePad's picture in this game). The tilt button below the touch controls' button turns the phone's gyro on or off for the camera (Settings > Controls > Gyro, "device"). Android's Back gesture opens Settings. Long-press the app icon to export or import the save (`user/GameData.bin`).
 
 ## Next step: stream-out output, a longer playthrough and Android
 

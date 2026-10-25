@@ -2,7 +2,7 @@
 
 Updated October 10, 2026.
 
-**Linked with the full reference game runtime, Captain Toad plays its first level on a Windows ARM64 Snapdragon X PC: menus, cutscenes and the level render through Vulkan at about 60 frames per second, SDL input moves Captain Toad and progress is saved. Its audio mixer runs (not yet checked by ear). Stream-out output, a full playthrough, Android rendering and an APK are not done yet. The headless diagnostic also enters the startup code on the Galaxy S25 Ultra.**
+**Linked with the full reference game runtime, Captain Toad plays its first level on a Windows ARM64 Snapdragon X PC: menus, cutscenes and the level render through Vulkan at about 60 frames per second, SDL input moves Captain Toad and progress is saved. Its audio mixer runs (not yet checked by ear). Stream-out output and a full playthrough are not done yet. The headless diagnostic also enters the startup code on the Galaxy S25 Ultra. A private APK built on macOS (USA v16) runs the menus and levels at about 60 fps on a Pixel 9 Pro XL (Mali-G715), with the phone's screen as the GamePad's touch screen and the phone's gyro as the GamePad's.**
 
 ## Completed
 
@@ -57,6 +57,7 @@ Reaching startup and compiling native code do not establish full game correctnes
 - `tools/recompile.py`: generation with SHA-256 validation and no Zelda hooks.
 - `tools/build_android.ps1` and `tools/build_windows.ps1`: reproducible builds.
 - `tools/run_android_diagnostic.ps1`: explicit-device ADB deployment and tests.
+- `tools/build_game_android.sh` and `tools/run_game_android.sh`: the private APK built, installed and started from macOS or Linux.
 - `patches/`: reference hook-list and strict-HLE extensions.
 - `local-reports/`: detailed manifests, audits and logs, kept outside Git.
 

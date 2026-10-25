@@ -144,7 +144,15 @@ REPLACEMENTS['../android/app/build.gradle'] = [
     ('        applicationId "org.wwhdrecomp.wwhd"\n', '        applicationId "org.ctrecomp.captaintoad"\n'),
 ]
 REPLACEMENTS['../android/app/src/main/res/values/strings.xml'] = [
-    ('    <string name="app_name">Wind Waker HD</string>\n', '    <string name="app_name">Captain Toad</string>\n'),
+    ('    <string name="app_name">Wind Waker HD</string>\n',
+     '    <string name="app_name">Captain Toad: Treasure Tracker</string>\n'),
+]
+# The PC route's game folder (copied over USB) holds Captain Toad's executable, not Wind Waker HD's.
+REPLACEMENTS['../android/app/src/main/java/org/wwhdrecomp/wwhd/SetupActivity.java'] = [
+    ('                return external != null && new File(external, "game/code/cking.rpx").isFile();\n',
+     '                return external != null && new File(external, "game/code/Kinopio.rpx").isFile();\n'),
+    ('                    (external != null && new File(external, "game/code/cking.rpx").isFile()));\n',
+     '                    (external != null && new File(external, "game/code/Kinopio.rpx").isFile()));\n'),
 ]
 REPLACEMENTS['../CMakeLists.txt'] = [
     ('target_include_directories(wwhd PRIVATE runtime/include runtime/src runtime/src/gx2)\n',
@@ -278,6 +286,125 @@ REPLACEMENTS['src/aspect.cpp'] = [
 REPLACEMENTS['src/interp.cpp'] = [
     ('void set_mode(int m) {\n    g_on = false;\n',
      'void set_mode(int m) {\n' + _ct_keep.format('m = 0;  // Wind Waker HD frame pacing (its hooks); Captain Toad runs at 60') + '    g_on = false;\n'),
+]
+# Captain Toad is played on the GamePad (touch, gyro camera): on Android the phone's screen starts as
+# the GamePad, so a touch anywhere on the picture is a GamePad touch. The view button still cycles.
+REPLACEMENTS['src/gfx/display_modes.cpp'] = [
+    ('std::atomic<int> g_mode{kDrcOff};\n',
+     '#ifdef CT_FOREIGN_GUEST\nstd::atomic<int> g_mode{kDrcGamePad};\n#else\n'
+     'std::atomic<int> g_mode{kDrcOff};\n#endif  // Captain Toad GamePad view\n'),
+    # The TV shows the GamePad's picture in Captain Toad: on Android a touch on the TV picture (TV only,
+    # or outside the corner GamePad) touches the GamePad at the same place.
+    ('    const Layout& L = g_tv_layout;\n    if (!L.pip_on || L.pip.w <= 0) return false;\n'
+     '    float x = (nx * g_tv_dw - L.pip.x) / L.pip.w, y = (ny * g_tv_dh - L.pip.y) / L.pip.h;\n'
+     '    if (!clamp_outside && (x < 0 || x > 1 || y < 0 || y > 1)) return false;\n',
+     '    const Layout& L = g_tv_layout;\n'
+     '#if defined(CT_FOREIGN_GUEST) && defined(__ANDROID__)\n'
+     '    const bool on_pip = L.pip_on && L.pip.w > 0 && nx * g_tv_dw >= L.pip.x && ny * g_tv_dh >= L.pip.y &&\n'
+     '        nx * g_tv_dw <= L.pip.x + L.pip.w && ny * g_tv_dh <= L.pip.y + L.pip.h;\n'
+     '    const Box& P = on_pip || L.drc_only || L.tv.w <= 0 ? L.pip : L.tv;\n'
+     '    if (P.w <= 0) return false;\n'
+     '    float x = (nx * g_tv_dw - P.x) / P.w, y = (ny * g_tv_dh - P.y) / P.h;\n'
+     '#else\n'
+     '    if (!L.pip_on || L.pip.w <= 0) return false;\n'
+     '    float x = (nx * g_tv_dw - L.pip.x) / L.pip.w, y = (ny * g_tv_dh - L.pip.y) / L.pip.h;\n'
+     '#endif  // Captain Toad TV touch\n'
+     '    if (!clamp_outside && (x < 0 || x > 1 || y < 0 || y > 1)) return false;\n'),
+    # The tilt button under the view button (Android): the phone's own gyro on or off, as
+    # Settings > Controls > Gyro's "device" source
+    ('#include "../aspect.h"\n', '#include "../aspect.h"\n#include "../motion/motion.h"\n'),
+    ('    g_button=p.button;\n', '    g_button=p.button;\n    g_tilt_button=p.tilt_button;\n'),
+    ('static Box g_button;\n', 'static Box g_button, g_tilt_button;\n'),
+    ('bool view_button_hit(float nx, float ny) {\n',
+     'bool tilt_button_hit(float nx, float ny) {\n'
+     '    std::lock_guard<std::mutex> lk(g_layout_mu);\n'
+     '    const float x = nx * g_tv_dw, y = ny * g_tv_dh;\n'
+     '    const Box& b = g_tilt_button;\n'
+     '    return b.w > 0 && x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h;\n'
+     '}\n'
+     'bool view_button_hit(float nx, float ny) {\n'),
+    ('    if (!g_pip_preview && view_button_enabled()) p.button = view_button(dw, dh);\n',
+     '    if (!g_pip_preview && view_button_enabled()) p.button = view_button(dw, dh);\n'
+     '#if defined(CT_FOREIGN_GUEST) && defined(__ANDROID__)\n'
+     '    if (p.button.w > 0) {\n'
+     '        p.tilt_button = p.button;\n'
+     '        // below the touch controls show/hide button (TouchControls.java: 0.125..0.205 of the short side)\n'
+     '        p.tilt_button.y = p.button.y + p.button.h * 2.3f;\n'
+     '        p.tilt_on = motion::settings().source == motion::kDevice;\n'
+     '    }\n'
+     '#endif  // Captain Toad tilt button\n'),
+]
+REPLACEMENTS['src/gfx/display.h'] = [
+    ('    int button_dot = 0;        // the host\'s state dot on the button: 0 none, 1 on (green), 2 paused (yellow)\n',
+     '    int button_dot = 0;        // the host\'s state dot on the button: 0 none, 1 on (green), 2 paused (yellow)\n'
+     '    Box tilt_button;           // Captain Toad on Android: the tilt (phone gyro) button, under the view button\n'
+     '    bool tilt_on = false;      // the phone\'s gyro moves the GamePad\n'),
+]
+REPLACEMENTS['src/gfx/display_modes.h'] = [
+    ('bool view_button_hit(float nx, float ny);',
+     'bool tilt_button_hit(float nx, float ny);  // the same for the tilt button (Captain Toad, Android)\n'
+     'bool view_button_hit(float nx, float ny);'),
+]
+REPLACEMENTS['src/gfx/vulkan/present.cpp'] = [
+    ('    d.box={t.x+t.w*0.72f,t.y+t.h*0.06f,t.w*0.22f,t.h*0.22f};quads.push_back(d);\n   }\n  }\n',
+     '    d.box={t.x+t.w*0.72f,t.y+t.h*0.06f,t.w*0.22f,t.h*0.22f};quads.push_back(d);\n   }\n  }\n'
+     '  if(p.tilt_button.w>0) {\n'
+     '   // the tilt button: a phone between two motion marks, its dot green while the gyro is on\n'
+     '   const gfx::Box& t=p.tilt_button;\n'
+     '   ComposeQuad b;b.solid=true;b.color[3]=0.45f;b.box={t.x,t.y,t.w,t.h};quads.push_back(b);\n'
+     '   ComposeQuad ph;ph.solid=true;ph.color[0]=ph.color[1]=ph.color[2]=0.9f;ph.color[3]=0.8f;\n'
+     '   ph.box={t.x+t.w*0.36f,t.y+t.h*0.2f,t.w*0.28f,t.h*0.6f};quads.push_back(ph);\n'
+     '   for(int i=0;i<2;i++) {\n'
+     '    ComposeQuad m;m.solid=true;m.color[0]=m.color[1]=m.color[2]=0.9f;m.color[3]=0.6f;\n'
+     '    m.box={t.x+t.w*(i?0.75f:0.17f),t.y+t.h*0.35f,t.w*0.08f,t.h*0.3f};quads.push_back(m);\n'
+     '   }\n'
+     '   const bool on=p.tilt_on;\n'
+     '   ComposeQuad d;d.solid=true;d.color[0]=on?0.2f:0.6f;d.color[1]=on?0.85f:0.6f;d.color[2]=on?0.3f:0.6f;d.color[3]=0.95f;\n'
+     '   d.box={t.x+t.w*0.72f,t.y+t.h*0.06f,t.w*0.22f,t.h*0.22f};quads.push_back(d);\n'
+     '  }\n'),
+]
+REPLACEMENTS['src/gfx/vulkan/backend.cpp'] = [
+    ('#include "overlay/hostui.h"\n', '#include "overlay/hostui.h"\n#include "motion/motion.h"\n'),
+    ('static SDL_FingerID touchFinger = 0, buttonFinger = 0;  // 0: none\n',
+     'static SDL_FingerID touchFinger = 0, buttonFinger = 0;  // 0: none\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '// The tilt button (display_modes.h): the phone\'s gyro on or off, saved as Settings > Controls > Gyro\n'
+     'static SDL_FingerID tiltFinger = 0;\n'
+     'static void tilt_button_released() {\n'
+     '  motion::Settings g = motion::settings();\n'
+     '  g.source = g.source == motion::kDevice ? motion::kOff : motion::kDevice;\n'
+     '  if (g.source == motion::kDevice && g.tuning.sensitivity_x == motion::Tuning::kDefaultSensitivity &&\n'
+     '      g.tuning.sensitivity_y == motion::Tuning::kDefaultSensitivity)\n'
+     '    g.tuning.sensitivity_x = g.tuning.sensitivity_y = motion::default_sensitivity(motion::kDevice);\n'
+     '  LOG("[gyro] tilt button: phone gyro %s", g.source == motion::kDevice ? "on" : "off");\n'
+     '  ::hostui::post([g] {\n'
+     '    motion::set_settings(g);\n'
+     '    for (const char* k : motion::kKeys) ::hostui::set(k, motion::value_of(g, k));\n'
+     '  });\n'
+     '}\n'
+     '#endif  // Captain Toad tilt button\n'),
+    ('    if (!dual && !buttonFinger && gfx::view_button_hit(f.x, f.y)) {\n',
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if (!dual && !tiltFinger && gfx::tilt_button_hit(f.x, f.y)) {\n'
+     '      tiltFinger = f.fingerID;\n'
+     '      return true;\n'
+     '    }\n'
+     '#endif  // Captain Toad tilt button\n'
+     '    if (!dual && !buttonFinger && gfx::view_button_hit(f.x, f.y)) {\n'),
+    ('    if (!touchFinger || f.fingerID != touchFinger) return f.fingerID == buttonFinger && buttonFinger;\n',
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if (tiltFinger && f.fingerID == tiltFinger) return true;\n'
+     '#endif  // Captain Toad tilt button\n'
+     '    if (!touchFinger || f.fingerID != touchFinger) return f.fingerID == buttonFinger && buttonFinger;\n'),
+    ('    if (buttonFinger && f.fingerID == buttonFinger) {\n      buttonFinger = 0;\n',
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if (tiltFinger && f.fingerID == tiltFinger) {\n'
+     '      tiltFinger = 0;\n'
+     '      if (event.type == SDL_EVENT_FINGER_UP) tilt_button_released();\n'
+     '      return true;\n'
+     '    }\n'
+     '#endif  // Captain Toad tilt button\n'
+     '    if (buttonFinger && f.fingerID == buttonFinger) {\n      buttonFinger = 0;\n'),
 ]
 REPLACEMENTS['src/gfx/gamepad_ui_state.cpp'] = [
     ('void display_read_gamepad_ui() {\n    if (!display_gamepad_state_needed()) return;\n',
@@ -562,6 +689,33 @@ for path in sorted((runtime / 'src').rglob('*')):
         continue
     source = path.read_text(encoding='utf-8')
     branded = literal.sub(rebrand, source)
+    if branded != source:
+        path.write_text(branded, encoding='utf-8', newline='\n')
+
+# The Android app's own text and save checks: its texts in every language, the save export/import
+# (Captain Toad's save is user/GameData.bin) and the setup notification. Java comments are left alone.
+ANDROID_BRANDING = [
+    ('The Wind Waker HD', 'Captain Toad: Treasure Tracker'),
+    ('Wind Waker HD', 'Captain Toad'),
+    ('code/cking.rpx', 'code/Kinopio.rpx'),
+    ('user/cking.sav', 'user/GameData.bin'),
+]
+android_main = runtime.parent / 'android/app/src/main'
+android_files = sorted(android_main.glob('res/values*/strings.xml')) + [
+    android_main / 'java/org/wwhdrecomp/wwhd' / name for name in ('SaveFiles.java', 'SetupService.java')]
+for path in android_files:
+    source = path.read_text(encoding='utf-8')
+    if path.suffix == '.java':
+        def android_rebrand(match):
+            text = match.group(0)
+            for old, new in ANDROID_BRANDING:
+                text = text.replace(old, new)
+            return text
+        branded = literal.sub(android_rebrand, source)
+    else:
+        branded = source
+        for old, new in ANDROID_BRANDING:
+            branded = branded.replace(old, new)
     if branded != source:
         path.write_text(branded, encoding='utf-8', newline='\n')
 
