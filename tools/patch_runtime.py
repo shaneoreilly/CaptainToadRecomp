@@ -333,6 +333,131 @@ REPLACEMENTS['src/gfx/display_modes.cpp'] = [
      '        p.tilt_on = motion::settings().source == motion::kDevice;\n'
      '    }\n'
      '#endif  // Captain Toad tilt button\n'),
+    ('bool overlay_hit(float nx, float ny, float* tx, float* ty, bool clamp_outside) {\n',
+     '// ---- the picture-in-picture GamePad moved and resized with the pointer (display_modes.h)\n'
+     'static int g_pip_drag = 0;  // 0 none, 1 move, 2 resize\n'
+     'static float g_pip_grab_x = 0, g_pip_grab_y = 0;  // moving: the pointer minus the picture\'s centre\n'
+     'static bool pip_under(const Layout& L, float x, float y) {\n'
+     '    const Box& P = L.pip;\n'
+     '    return L.pip_on && !L.drc_only && P.w > 0 && P.h > 0 && L.tv.w > 0 && L.tv.h > 0 && x >= P.x && y >= P.y &&\n'
+     '        x <= P.x + P.w && y <= P.y + P.h;\n'
+     '}\n'
+     '// the picture with its centre at (cx, cy) in display units, `size` of the TV picture\'s width\n'
+     'static void pip_put(const Layout& L, float cx, float cy, float size) {\n'
+     '    g_pip_size = pip_clamp_size(size);\n'
+     '    pip_set_position(pip_place(L.tv, L.pip.w / L.pip.h, g_pip_size, (cx - L.tv.x) / L.tv.w, (cy - L.tv.y) / L.tv.h));\n'
+     '}\n'
+     'bool pip_drag_begin(float nx, float ny) {\n'
+     '    std::lock_guard<std::mutex> lk(g_layout_mu);\n'
+     '    const Layout& L = g_tv_layout;\n'
+     '    const float x = nx * g_tv_dw, y = ny * g_tv_dh;\n'
+     '    if (!pip_under(L, x, y)) return false;\n'
+     '    const Box& P = L.pip;\n'
+     '    const float corner = std::max(12.0f, std::min(P.w, P.h) * 0.2f);\n'
+     '    g_pip_drag = x > P.x + P.w - corner && y > P.y + P.h - corner ? 2 : 1;\n'
+     '    g_pip_grab_x = x - (P.x + P.w / 2);\n'
+     '    g_pip_grab_y = y - (P.y + P.h / 2);\n'
+     '    return true;\n'
+     '}\n'
+     'bool pip_dragging() { return g_pip_drag != 0; }\n'
+     'void pip_drag_move(float nx, float ny) {\n'
+     '    std::lock_guard<std::mutex> lk(g_layout_mu);\n'
+     '    const Layout& L = g_tv_layout;\n'
+     '    if (!g_pip_drag || L.pip.w <= 0 || L.pip.h <= 0 || L.tv.w <= 0 || L.tv.h <= 0) return;\n'
+     '    const float x = nx * g_tv_dw, y = ny * g_tv_dh;\n'
+     '    if (g_pip_drag == 1) {\n'
+     '        pip_put(L, x - g_pip_grab_x, y - g_pip_grab_y, g_pip_size);\n'
+     '        return;\n'
+     '    }\n'
+     '    // resizing: the top-left corner stays, the bottom-right one follows the pointer\n'
+     '    const float aspect = L.pip.w / L.pip.h;\n'
+     '    const float w = pip_clamp_size(std::max({x - L.pip.x, (y - L.pip.y) * aspect, 1.0f}) / L.tv.w) * L.tv.w;\n'
+     '    pip_put(L, L.pip.x + w / 2, L.pip.y + w / aspect / 2, w / L.tv.w);\n'
+     '}\n'
+     'bool pip_drag_end() {\n'
+     '    const bool was = g_pip_drag != 0;\n'
+     '    g_pip_drag = 0;\n'
+     '    return was;\n'
+     '}\n'
+     'bool pip_wheel(float nx, float ny, float steps) {\n'
+     '    std::lock_guard<std::mutex> lk(g_layout_mu);\n'
+     '    const Layout& L = g_tv_layout;\n'
+     '    if (!pip_under(L, nx * g_tv_dw, ny * g_tv_dh) || steps == 0) return false;\n'
+     '    pip_put(L, L.pip.x + L.pip.w / 2, L.pip.y + L.pip.h / 2, g_pip_size * std::pow(1.1f, steps));\n'
+     '    return true;\n'
+     '}\n'
+     'bool overlay_hit(float nx, float ny, float* tx, float* ty, bool clamp_outside) {\n'),
+]
+# The picture-in-picture GamePad moved and resized with the pointer (macOS TV window): a right-button
+# or Option drag on the picture moves it (Custom placement), the same drag from its bottom-right corner
+# resizes it, and the scroll wheel over it resizes it. A plain click stays a GamePad touch.
+REPLACEMENTS['src/gfx/display.mm'] = [
+    ('''- (void)mouseDown:(NSEvent*)e {
+    float x, y;
+    if ([self map:e x:&x y:&y clamp:false]) {
+        self.touching = true;
+''', '''// the picture-in-picture GamePad: a right-button or Option drag moves it (from its bottom-right corner:
+// resizes it), the scroll wheel over it resizes it (display_modes.h)
+- (void)point:(NSEvent*)e x:(float*)nx y:(float*)ny {
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    NSSize sz = self.bounds.size;
+    *nx = sz.width > 0 ? p.x / sz.width : 0;
+    *ny = sz.height > 0 ? 1.0f - p.y / sz.height : 0;
+}
+- (bool)pipBegin:(NSEvent*)e {
+    float nx, ny;
+    [self point:e x:&nx y:&ny];
+    if (!gfx::pip_drag_begin(nx, ny)) return false;
+    [NSCursor.closedHandCursor push];
+    return true;
+}
+- (bool)pipMove:(NSEvent*)e {
+    if (!gfx::pip_dragging()) return false;
+    float nx, ny;
+    [self point:e x:&nx y:&ny];
+    gfx::pip_drag_move(nx, ny);
+    return true;
+}
+- (bool)pipEnd {
+    if (!gfx::pip_drag_end()) return false;
+    [NSCursor pop];
+    gfx::save_options();
+    return true;
+}
+- (void)rightMouseDown:(NSEvent*)e {
+    if (![self pipBegin:e]) [super rightMouseDown:e];
+}
+- (void)rightMouseDragged:(NSEvent*)e {
+    if (![self pipMove:e]) [super rightMouseDragged:e];
+}
+- (void)rightMouseUp:(NSEvent*)e {
+    if (![self pipEnd]) [super rightMouseUp:e];
+}
+- (void)scrollWheel:(NSEvent*)e {
+    float nx, ny;
+    [self point:e x:&nx y:&ny];
+    const float steps = e.hasPreciseScrollingDeltas ? e.scrollingDeltaY / 20.0f : e.scrollingDeltaY;
+    if (gfx::pip_wheel(nx, ny, steps)) gfx::save_options();
+    else [super scrollWheel:e];
+}
+- (void)mouseDown:(NSEvent*)e {
+    float x, y;
+    if ((e.modifierFlags & NSEventModifierFlagOption) && [self pipBegin:e]) return;
+    if ([self map:e x:&x y:&y clamp:false]) {
+        self.touching = true;
+'''),
+    ('''- (void)mouseDragged:(NSEvent*)e {
+    float x, y;
+    if (self.touching''', '''- (void)mouseDragged:(NSEvent*)e {
+    float x, y;
+    if ([self pipMove:e]) return;
+    if (self.touching'''),
+    ('''- (void)mouseUp:(NSEvent*)e {
+    float x, y;
+    if (!self.touching) return;''', '''- (void)mouseUp:(NSEvent*)e {
+    float x, y;
+    if ([self pipEnd]) return;
+    if (!self.touching) return;'''),
 ]
 REPLACEMENTS['src/gfx/display.h'] = [
     ('    int button_dot = 0;        // the host\'s state dot on the button: 0 none, 1 on (green), 2 paused (yellow)\n',
@@ -344,6 +469,17 @@ REPLACEMENTS['src/gfx/display_modes.h'] = [
     ('bool view_button_hit(float nx, float ny);',
      'bool tilt_button_hit(float nx, float ny);  // the same for the tilt button (Captain Toad, Android)\n'
      'bool view_button_hit(float nx, float ny);'),
+    ('void pip_set_position(PipPosition position);\n',
+     'void pip_set_position(PipPosition position);\n'
+     '// Pointer gestures on the picture-in-picture GamePad in the TV window (0..1 from the top left):\n'
+     '// begin is true when the point is on the picture (a drag from its bottom-right corner resizes it,\n'
+     '// any other drag moves it); end is true when a drag ended (the host saves the placement); wheel\n'
+     '// resizes the picture under the point by 10% per step and is true when it did.\n'
+     'bool pip_drag_begin(float nx, float ny);\n'
+     'bool pip_dragging();\n'
+     'void pip_drag_move(float nx, float ny);\n'
+     'bool pip_drag_end();\n'
+     'bool pip_wheel(float nx, float ny, float steps);\n'),
 ]
 REPLACEMENTS['src/gfx/vulkan/present.cpp'] = [
     ('    d.box={t.x+t.w*0.72f,t.y+t.h*0.06f,t.w*0.22f,t.h*0.22f};quads.push_back(d);\n   }\n  }\n',

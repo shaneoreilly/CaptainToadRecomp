@@ -172,6 +172,8 @@ Metal is the default renderer. Choose Vulkan with *Graphics > Renderer*. Dynamic
 
 The *Gameplay* menu and the settings overlay's *Cheats* edit the save (`save/user/GameData.bin`, kept as `GameData.bin.before-cheats` before the first cheat) and restart the game: unlock every episode and course, clear every course, every Super Gem, every bonus objective, every challenge time, every Pixel Toad and 100% completion. The course list comes from the game's `content/SystemData/StageList.szs`; the save layout follows the CTSe save editor's description. Clearing episode 3's final course also marks the ending as seen, as the game does after the credits: a save with that course cleared and the ending unseen makes the episode book fail.
 
+In the TV window, the picture-in-picture GamePad (Display > GamePad screen > Picture in picture) can be moved by dragging it with the right mouse button or with Option held, resized by dragging its bottom-right corner the same way or by scrolling over it; the placement is saved. A plain click on it stays a GamePad touch.
+
 ## Build the Android test APK
 
 `tools/build_game_android.ps1` builds the same runtime with the NDK as the reference Android app's `libmain.so` (with SDL3, libc++ and the AdrenoTools hooks), then a private APK with Gradle. `tools/patch_runtime.py` gives the app its own package, `org.ctrecomp.captaintoad`, and name, so it never replaces a Wind Waker HD install. `tools/run_game_android.ps1` installs it on the phone named by `-Serial` or `local-reports/device-target.json`, copies the prepared game tree with `-PushGame`, starts it and saves `adb logcat -s wwhd` to `local-reports/android-game.log`:
