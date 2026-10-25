@@ -820,14 +820,21 @@ REPLACEMENTS['src/gfx/vulkan/surfaces.cpp'] += [
      '    float x, y, w, h;\n'
      '    const float pixels = float(R.tv.swapExtent.height);\n'
      '    if (pixels <= 0 || !gfx::main_picture(&x, &y, &w, &h)) return 1.0f;\n'
-     '    const float lines = gfx::main_picture_is_gamepad() ? 480.0f : 720.0f;\n'
-     '    return std::clamp(std::round(h * pixels / lines * 16.0f) / 16.0f, 1.0f, 4.0f);\n'
+     '    // the TV\'s 720 lines: its buffers are also the GamePad picture\'s source; the GamePad\'s own 480\n'
+     '    // apart (gfx::g_ct_pad_scale)\n'
+     '    auto factor = [&](float lines) { return std::clamp(std::round(h * pixels / lines * 16.0f) / 16.0f, 1.0f, 4.0f); };\n'
+     '    if (!gfx::main_picture_is_gamepad()) return factor(720.0f);\n'
+     '    // GamePad only: the course reaches the screen through the GamePad\'s buffers, so the TV\'s need no\n'
+     '    // more lines than those hold (480 at up to 4x)\n'
+     '    gfx::g_ct_pad_scale = factor(480.0f);\n'
+     '    return std::max(1.0f, std::floor(gfx::g_ct_pad_scale * 480.0f / 720.0f * 16.0f) / 16.0f);\n'
      '}\n'
      '#endif  // Captain Toad screen resolution\n'
      'void latch_res_scale() {\n'),
     ('    g_res_frame = g_res_requested.load(std::memory_order_relaxed);\n    latch_aspect();\n',
      '    g_res_frame = g_res_requested.load(std::memory_order_relaxed);\n'
      '#ifdef CT_FOREIGN_GUEST\n'
+     '    gfx::g_ct_pad_scale = 0;\n'
      '    if (g_res_frame == 0) g_res_frame = screen_res_scale();\n'
      '#endif  // Captain Toad screen resolution\n'
      '    latch_aspect();\n'),
@@ -863,14 +870,21 @@ REPLACEMENTS['src/gfx/metal_surfaces.mm'] = REPLACEMENTS.get('src/gfx/metal_surf
      '    float x, y, w, h;\n'
      '    const float pixels = R.tv.layer ? float(R.tv.layer.drawableSize.height) : 0.0f;\n'
      '    if (pixels <= 0 || !gfx::main_picture(&x, &y, &w, &h)) return 1.0f;\n'
-     '    const float lines = gfx::main_picture_is_gamepad() ? 480.0f : 720.0f;\n'
-     '    return std::clamp(std::round(h * pixels / lines * 16.0f) / 16.0f, 1.0f, 4.0f);\n'
+     '    // the TV\'s 720 lines: its buffers are also the GamePad picture\'s source; the GamePad\'s own 480\n'
+     '    // apart (gfx::g_ct_pad_scale)\n'
+     '    auto factor = [&](float lines) { return std::clamp(std::round(h * pixels / lines * 16.0f) / 16.0f, 1.0f, 4.0f); };\n'
+     '    if (!gfx::main_picture_is_gamepad()) return factor(720.0f);\n'
+     '    // GamePad only: the course reaches the screen through the GamePad\'s buffers, so the TV\'s need no\n'
+     '    // more lines than those hold (480 at up to 4x)\n'
+     '    gfx::g_ct_pad_scale = factor(480.0f);\n'
+     '    return std::max(1.0f, std::floor(gfx::g_ct_pad_scale * 480.0f / 720.0f * 16.0f) / 16.0f);\n'
      '}\n'
      '#endif  // Captain Toad screen resolution\n'
      'void latch_res_scale() {\n'),
     ('    g_res_frame = g_res_requested.load(std::memory_order_relaxed);\n    latch_aspect();\n',
      '    g_res_frame = g_res_requested.load(std::memory_order_relaxed);\n'
      '#ifdef CT_FOREIGN_GUEST\n'
+     '    gfx::g_ct_pad_scale = 0;\n'
      '    if (g_res_frame == 0) {\n'
      '        g_res_frame = screen_res_scale();\n'
      '        static float logged = 0;\n'
@@ -907,46 +921,53 @@ REPLACEMENTS['src/gfx/menu.mm'] += [
      '        @"As many pixels as the picture covers in the window, up to 4x: GamePad only on a 4K screen draws at 4x";\n'
      '#endif  // Captain Toad screen resolution\n'),
 ]
-# The screen nobody sees draws at 1x: GamePad only still has the game draw the TV picture, and TV only the
-# GamePad's, each frame. At 3x the hidden 1280x720 TV costs more GPU time than the GamePad picture shown,
-# enough to push heavier courses past 16.7 ms on an M3 Pro (Captain Toad then runs at 30). display_plan
-# publishes which screen is hidden; both renderers' target_scale give that screen's buffers 1x (the
-# GamePad's are 854x480 and its halvings, the TV's the other 16:9 ones), and rescale() remakes them when
-# the view changes, keeping their contents.
+# The GamePad's buffers draw at 1x in TV only, where its picture is shown nowhere (the game still draws it
+# each frame). The TV's buffers never do: Captain Toad draws its course once, into the TV's buffers, and
+# copies it to the GamePad, so they are the GamePad picture's source in GamePad only too. With the Screen
+# resolution in GamePad only, the TV's buffers get the factor for the lines the GamePad picture covers
+# (720 of them in it) and the GamePad's own (its 2D layers) theirs: ct_screen_pad_scale.
 REPLACEMENTS['src/gfx/display_modes.h'] += [
     ('extern std::atomic<bool> g_touch_controller, g_touch_controls;\n',
      'extern std::atomic<bool> g_touch_controller, g_touch_controls;\n'
-     '// Captain Toad: 1 the TV picture is shown nowhere (GamePad only), 2 the GamePad\'s (TV only); the\n'
-     '// renderers draw that screen\'s buffers at 1x (display_plan sets it)\n'
+     '// Captain Toad: 2 the GamePad\'s picture is shown nowhere (TV only): the renderers draw its buffers\n'
+     '// at 1x (display_plan sets it)\n'
      'extern std::atomic<int> g_ct_hidden_screen;\n'
-     'bool ct_hidden_target(uint32_t width, uint32_t height, uint32_t slices);  // a buffer of that screen\n'),
+     'bool ct_gamepad_sized(uint32_t width, uint32_t height);  // 854x480 or one of its halvings\n'
+     'bool ct_hidden_target(uint32_t width, uint32_t height, uint32_t slices);  // a buffer of that screen\n'
+     '// with the Screen resolution in GamePad only: the factor for the GamePad\'s own buffers (render thread,\n'
+     '// set where the factor is latched; 0 otherwise)\n'
+     'extern float g_ct_pad_scale;\n'),
 ]
 REPLACEMENTS['src/gfx/display_modes.cpp'] += [
     ('std::atomic<bool> g_has_drc_window{false};\n',
      'std::atomic<bool> g_has_drc_window{false};\n'
      'std::atomic<int> g_ct_hidden_screen{0};\n'
-     'bool ct_hidden_target(uint32_t width, uint32_t height, uint32_t slices) {\n'
-     '    const int hidden = g_ct_hidden_screen.load(std::memory_order_relaxed);\n'
-     '    if (!hidden || slices != 1 || height == 0) return false;\n'
-     '    bool pad = false;  // the GamePad\'s 854x480 or one of its halvings\n'
+     'float g_ct_pad_scale = 0;\n'
+     'bool ct_gamepad_sized(uint32_t width, uint32_t height) {\n'
      '    for (uint32_t w = 854, h = 480; w >= 32; w >>= 1, h >>= 1)\n'
-     '        if ((width == w || width == w + 1) && height == h) pad = true;\n'
-     '    const float r = float(width) * 9.0f / (float(height) * 16.0f);\n'
-     '    return hidden == 2 ? pad : !pad && width >= 32 && r > 0.97f && r < 1.03f;\n'
+     '        if ((width == w || width == w + 1) && height == h) return true;\n'
+     '    return false;\n'
+     '}\n'
+     'bool ct_hidden_target(uint32_t width, uint32_t height, uint32_t slices) {\n'
+     '    return g_ct_hidden_screen.load(std::memory_order_relaxed) == 2 && slices == 1 && ct_gamepad_sized(width, height);\n'
      '}\n'),
     ('    if (have_tv || drc_only) L = layout(dw, dh, have_tv ? tw : 0, have_tv ? th : 0, have_drc ? pw : 0, have_drc ? ph : 0, pip, drc_only);\n',
      '    if (have_tv || drc_only) L = layout(dw, dh, have_tv ? tw : 0, have_tv ? th : 0, have_drc ? pw : 0, have_drc ? ph : 0, pip, drc_only);\n'
      '#ifdef CT_FOREIGN_GUEST\n'
-     '    g_ct_hidden_screen = L.drc_only ? 1 : g_mode == kDrcOff && !g_has_drc_window && !pip ? 2 : 0;\n'
+     '    g_ct_hidden_screen = !L.drc_only && g_mode == kDrcOff && !g_has_drc_window && !pip ? 2 : 0;\n'
      '#endif  // Captain Toad hidden screen at 1x\n'),
 ]
 _ct_hidden_scale = ('#ifdef CT_FOREIGN_GUEST\n'
     '    if (gfx::ct_hidden_target(s->width, s->height, s->slices)) return 1.0f;  // Captain Toad: shown nowhere\n'
     '#endif\n')
+_ct_pad_scale = ('#ifdef CT_FOREIGN_GUEST\n'
+    '    if (gfx::g_ct_pad_scale > 0 && s->slices == 1 && gfx::ct_gamepad_sized(s->width, s->height))\n'
+    '        return gfx::g_ct_pad_scale * g_dyn_frame;  // Captain Toad: the GamePad\'s own, Screen resolution\n'
+    '#endif\n')
 for _file in ('src/gfx/metal_surfaces.mm', 'src/gfx/vulkan/surfaces.cpp'):
     REPLACEMENTS[_file] = REPLACEMENTS.get(_file, []) + [
         ('    if (s->slices > 1) return res_scale();\n    return res_scale() * g_dyn_frame;\n',
-         _ct_hidden_scale + '    if (s->slices > 1) return res_scale();\n    return res_scale() * g_dyn_frame;\n'),
+         _ct_hidden_scale + _ct_pad_scale + '    if (s->slices > 1) return res_scale();\n    return res_scale() * g_dyn_frame;\n'),
     ]
     REPLACEMENTS[_file] += [
         ('    if (g_dyn_frame == 1.0f || s->fmt.compressed || s->mips > 1 || s->slices > 1) return 1.0f;\n',
