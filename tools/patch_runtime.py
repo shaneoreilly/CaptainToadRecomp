@@ -1174,6 +1174,32 @@ REPLACEMENTS['src/overlay/gyro_popup.h'] = [
      '        if (i != motion::kMouse || g.source == motion::kMouse)  // it waits for Wind Waker HD\'s aiming\n'
      '#endif\n'),
 ]
+# Sound output: the reference decides between the TV mix and the GamePad mix from Wind Waker HD's sound
+# player (audio_output_mode.h), which Captain Toad does not have, so it always played the TV mix alone
+# and lost what the game sends to the GamePad only. Automatic now plays the GamePad mix while the TV mix
+# has been silent for a quarter of a second and the GamePad's is not, and otherwise the TV mix with the
+# voices that only reach the GamePad (Settings > Audio > GamePad sounds). WWHD_AUDIO_OUTPUT still wins.
+REPLACEMENTS['src/hle/ax.cpp'] += [
+    ('    const float pad_gain = g_output.play_gamepad_only && audio::gamepad_sounds() ? audio::gamepad_sounds_volume() : 0.f;\n',
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    if (g_output.source == audio::OutputSelect::kAuto) {  // Captain Toad (CaptainToadRecomp tools/patch_runtime.py)\n'
+     '        constexpr int kQuietFrames = 83;  // 0.25 s of 3 ms frames\n'
+     '        static int tv_quiet = kQuietFrames;\n'
+     '        bool tv_on = false, drc_on = false;\n'
+     '        for (int i = 0; i < kSamples48; ++i) {\n'
+     '            for (int ch = 0; ch < channels; ++ch) tv_on |= std::abs(tv_lr[ch][i]) > 8;\n'
+     '            for (int ch = 0; ch < 2; ++ch) drc_on |= std::abs(drc_lr[ch][i]) > 8;\n'
+     '        }\n'
+     '        tv_quiet = tv_on ? 0 : std::min(tv_quiet + 1, kQuietFrames);\n'
+     '        const bool pad = drc_on && tv_quiet >= kQuietFrames;\n'
+     '        if (pad != g_output.play_drc) LOG("[ax] host output: %s", pad ? "GamePad (the TV mix is silent)" : "TV");\n'
+     '        g_output.play_tv = !pad;\n'
+     '        g_output.play_drc = pad;\n'
+     '        g_output.play_gamepad_only = !pad;\n'
+     '    }\n'
+     '#endif  // Captain Toad sound output\n'
+     '    const float pad_gain = g_output.play_gamepad_only && audio::gamepad_sounds() ? audio::gamepad_sounds_volume() : 0.f;\n'),
+]
 # Exports that read state private to a reference source file are appended to that file.
 APPENDS = {
     'src/hle/ax.cpp': '''
