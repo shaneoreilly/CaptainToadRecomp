@@ -48,7 +48,7 @@ Game files, tickets, keys, generated game code, builds and local reports are exc
 
 ## Pinned references
 
-- [ZeldaWWHDRecomp](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp), commit `0a53327a6876d2c404406ac74fe11ac6a3333a99`. Its MPL-2.0 license and credits remain in the reference checkout.
+- [ZeldaWWHDRecomp](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp), commit `59aa6ddeadd08b557a17743834a2d89a1d2dfc11`. Its MPL-2.0 license and credits remain in the reference checkout.
 - [cdecrypt](https://github.com/VitaSmith/cdecrypt), commit `0ca58c66b0f23309c69b691caf6d39bf8868d96d`, used for the initial local extraction. Its original license remains in the separate `work/cdecrypt` checkout.
 
 The reference recompiler accepts an optional `hook_paths` argument. Omitting it preserves the original behavior; passing `[]` explicitly disables all hooks. This prototype always uses `[]`, so Zelda-specific addresses and hooks are not applied to Captain Toad. `tools/patch_reference.py` reproduces this extension and rejects an unexpected source layout.

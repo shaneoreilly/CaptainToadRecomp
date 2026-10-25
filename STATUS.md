@@ -61,7 +61,7 @@ Reaching startup and compiling native code do not establish full game correctnes
 - `patches/`: reference hook-list and strict-HLE extensions.
 - `local-reports/`: detailed manifests, audits and logs, kept outside Git.
 
-Pinned references: ZeldaWWHDRecomp `0a53327a6876d2c404406ac74fe11ac6a3333a99`; cdecrypt `0ca58c66b0f23309c69b691caf6d39bf8868d96d`.
+Pinned references: ZeldaWWHDRecomp `59aa6ddeadd08b557a17743834a2d89a1d2dfc11`; cdecrypt `0ca58c66b0f23309c69b691caf6d39bf8868d96d`.
 
 ## GX2 resource bootstrap
 

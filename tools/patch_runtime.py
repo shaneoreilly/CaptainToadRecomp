@@ -84,8 +84,8 @@ REPLACEMENTS = {
     # Stream out (Cemu GX2_Streamout.cpp, LatteCommandProcessor.cpp, LatteStreamoutGPU.cpp): context
     # updates run on the render thread in command order; draws advance each buffer's write offset.
     'src/gx2/gx2_cmd.h': [
-        ('    OP_CLOUDS_END,\n    OP_COUNT\n',
-         '    OP_CLOUDS_END,\n'
+        ('    OP_SUBMITTED_UNIFORMS,\n    OP_COUNT\n',
+         '    OP_SUBMITTED_UNIFORMS,\n'
          '    OP_STREAMOUT_UPDATE,  // buffer index, mode (0 reset, 2 load from context, 3 save to context), context\n'
          '    OP_COUNT\n'),
     ],

@@ -4,7 +4,7 @@
 set -eu
 task_root=$(cd "$(dirname "$0")/.." && pwd)
 task_reference="$task_root/upstream"
-task_commit=0a53327a6876d2c404406ac74fe11ac6a3333a99
+task_commit=59aa6ddeadd08b557a17743834a2d89a1d2dfc11
 python=${PYTHON:-python3}
 if [ ! -e "$task_reference" ]; then
     git init "$task_reference"

@@ -2,7 +2,7 @@ param([string]$Python = 'python')
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $taskReference = Join-Path $taskRoot 'upstream'
-$taskCommit = '0a53327a6876d2c404406ac74fe11ac6a3333a99'
+$taskCommit = '59aa6ddeadd08b557a17743834a2d89a1d2dfc11'
 if (-not (Test-Path -LiteralPath $taskReference)) {
     & git init $taskReference
     if ($LASTEXITCODE -ne 0) { throw 'Could not initialize reference checkout' }
