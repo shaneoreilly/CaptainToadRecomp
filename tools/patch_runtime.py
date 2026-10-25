@@ -284,19 +284,23 @@ REPLACEMENTS['src/overlay/overlay.cpp'] += [
 # original game's values here whatever is saved.
 _ct_keep = '#ifdef CT_FOREIGN_GUEST\n    {}\n#endif\n'
 REPLACEMENTS['src/aspect.cpp'] = [
-    ('void set_mode(int m) {\n    if (m < 0 || m >= kModes) return;\n',
-     'void set_mode(int m) {\n' + _ct_keep.format('m = kOriginal;  // Wind Waker HD only') + '    if (m < 0 || m >= kModes) return;\n'),
+    # Android: the picture takes the phone's shape (runtime/ct_frame.cpp draws Captain Toad wider)
+    ('    if (!e || !*e) return kOriginal;\n',
+     '#if defined(CT_FOREIGN_GUEST) && defined(__ANDROID__)\n    if (!e || !*e) return kWindow;\n#else\n'
+     '    if (!e || !*e) return kOriginal;\n#endif  // Captain Toad Android aspect\n'),
     ('void set_fov_scale(float scale) {\n', 'void set_fov_scale(float scale) {\n' + _ct_keep.format('scale = 1.0f;  // Wind Waker HD only')),
 ]
 REPLACEMENTS['src/interp.cpp'] = [
     ('void set_mode(int m) {\n    g_on = false;\n',
      'void set_mode(int m) {\n' + _ct_keep.format('m = 0;  // Wind Waker HD frame pacing (its hooks); Captain Toad runs at 60') + '    g_on = false;\n'),
 ]
-# Captain Toad is played on the GamePad (touch, gyro camera): on Android the phone's screen starts as
-# the GamePad, so a touch anywhere on the picture is a GamePad touch. The view button still cycles.
+# Captain Toad is played on the GamePad (touch, gyro camera). On Android the phone starts with the TV
+# picture drawn at the phone's shape (aspect.cpp "Match window", runtime/ct_frame.cpp), and a touch
+# anywhere on it is a GamePad touch (overlay_hit below); the menu's Screen item switches.
 REPLACEMENTS['src/gfx/display_modes.cpp'] = [
     ('std::atomic<int> g_mode{kDrcOff};\n',
-     '#ifdef CT_FOREIGN_GUEST\nstd::atomic<int> g_mode{kDrcGamePad};\n#else\n'
+     '#if defined(CT_FOREIGN_GUEST) && defined(__ANDROID__)\nstd::atomic<int> g_mode{kDrcOff};\n'
+     '#elif defined(CT_FOREIGN_GUEST)\nstd::atomic<int> g_mode{kDrcGamePad};\n#else\n'
      'std::atomic<int> g_mode{kDrcOff};\n#endif  // Captain Toad GamePad view\n'),
     # The TV shows the GamePad's picture in Captain Toad: on Android a touch on the TV picture (TV only,
     # or outside the corner GamePad) touches the GamePad at the same place.
@@ -307,8 +311,15 @@ REPLACEMENTS['src/gfx/display_modes.cpp'] = [
      '#if defined(CT_FOREIGN_GUEST) && defined(__ANDROID__)\n'
      '    const bool on_pip = L.pip_on && L.pip.w > 0 && nx * g_tv_dw >= L.pip.x && ny * g_tv_dh >= L.pip.y &&\n'
      '        nx * g_tv_dw <= L.pip.x + L.pip.w && ny * g_tv_dh <= L.pip.y + L.pip.h;\n'
-     '    const Box& P = on_pip || L.drc_only || L.tv.w <= 0 ? L.pip : L.tv;\n'
+     '    Box P = on_pip || L.drc_only || L.tv.w <= 0 ? L.pip : L.tv;\n'
      '    if (P.w <= 0) return false;\n'
+     '    // a picture wider than 16:9 (Settings > Display > Picture shape) shows more at the sides of the\n'
+     '    // GamePad\'s 854x480: its middle 16:9 is the GamePad screen\n'
+     '    if (P.w > P.h * 16.0f / 9.0f + 1.0f) {\n'
+     '        const float w = P.h * 16.0f / 9.0f;\n'
+     '        P.x += (P.w - w) / 2;\n'
+     '        P.w = w;\n'
+     '    }\n'
      '    float x = (nx * g_tv_dw - P.x) / P.w, y = (ny * g_tv_dh - P.y) / P.h;\n'
      '#else\n'
      '    if (!L.pip_on || L.pip.w <= 0) return false;\n'
@@ -826,7 +837,49 @@ REPLACEMENTS['src/gfx/vulkan/backend.cpp'] = [
     ('          double(requested_res_scale()), fxaa_enabled() ? " · FXAA" : "");\n',
      '          double(requested_res_scale() > 0 ? requested_res_scale() : res_scale()), fxaa_enabled() ? " · FXAA" : "");\n'),
 ]
+# Captain Toad's GamePad shows the same course as the TV, drawn with its own camera (runtime/ct_frame.cpp):
+# with a wider picture shape its screen-sized buffers widen too, so GamePad only fills the screen as well.
+_ct_drc_shape = ('#ifndef CT_FOREIGN_GUEST  // Captain Toad: the GamePad\'s picture takes the shape too\n', '#endif\n')
+REPLACEMENTS['src/gfx/metal_surfaces.mm'] = REPLACEMENTS.get('src/gfx/metal_surfaces.mm', []) + [
+    ('    for (uint32_t w = 854, h = 480; w >= 32; w >>= 1, h >>= 1)\n'
+     '        if ((s->width == w || s->width == w + 1) && s->height == h) return false;\n',
+     _ct_drc_shape[0] + '    for (uint32_t w = 854, h = 480; w >= 32; w >>= 1, h >>= 1)\n'
+     '        if ((s->width == w || s->width == w + 1) && s->height == h) return false;\n' + _ct_drc_shape[1]),
+]
+REPLACEMENTS['src/gfx/vulkan/surfaces.cpp'] = REPLACEMENTS.get('src/gfx/vulkan/surfaces.cpp', []) + [
+    ('    for (uint32_t w = 854, h = 480; w >= 32; w >>= 1, h >>= 1)\n'
+     '        if ((width == w || width == w + 1) && height == h) return false;\n',
+     _ct_drc_shape[0] + '    for (uint32_t w = 854, h = 480; w >= 32; w >>= 1, h >>= 1)\n'
+     '        if ((width == w || width == w + 1) && height == h) return false;\n' + _ct_drc_shape[1]),
+]
+# Settings > Display holds everything about the picture: the view and, for Captain Toad, its shape
+# (aspect.cpp, runtime/ct_frame.cpp), which Wind Waker HD keeps under Graphics.
 REPLACEMENTS['src/overlay/overlay.cpp'] += [
+    ('        static const char* const modes[] = {"Separate window", "Picture-in-picture", "Automatic picture-in-picture", "Off", "GamePad only"};\n',
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '        static const char* const modes[] = {"Separate window", "Picture-in-picture", "Automatic picture-in-picture", "TV only", "GamePad only"};\n'
+     '#else\n'
+     '        static const char* const modes[] = {"Separate window", "Picture-in-picture", "Automatic picture-in-picture", "Off", "GamePad only"};\n'
+     '#endif\n'),
+    ('        if (mode == 4)\n            note("Only the GamePad picture. In the game, Minus switches to Off-TV "\n'
+     '                 "Play (the game on the GamePad).");\n    }\n',
+     '        if (mode == 4)\n            note("Only the GamePad picture. In the game, Minus switches to Off-TV "\n'
+     '                 "Play (the game on the GamePad).");\n    }\n'
+     '#ifdef CT_FOREIGN_GUEST\n'
+     '    {  // Captain Toad: the TV picture\'s shape (aspect.cpp, runtime/ct_frame.cpp)\n'
+     '        int shape = aspect::mode();\n'
+     '        if (shape <= aspect::k32x9 &&\n'
+     '#ifdef __ANDROID__\n'
+     '            combo("Picture shape", &shape, "16:9 (original)\\0Match screen\\0" "16:10\\0" "21:9\\0" "32:9\\0"))\n'
+     '#else\n'
+     '            combo("Picture shape", &shape, "16:9 (original)\\0Match window\\0" "16:10\\0" "21:9\\0" "32:9\\0"))\n'
+     '#endif\n'
+     '            post_changed([shape] { aspect::set_mode(shape); hostui::set("aspectMode", std::to_string(shape)); });\n'
+     '        help("The TV picture\'s shape. Wider shapes show more of the course at the sides; nothing is stretched.\\n"\n'
+     '             "Match fills the screen (or window). The camera takes a new shape when the next course\\n"\n'
+     '             "starts. The GamePad picture takes the same shape; touches reach its middle 16:9.");\n'
+     '    }\n'
+     '#endif  // Captain Toad picture shape\n'),
     ('        if (radio(names[i], std::fabs(cur - s) < 0.01f)) post_changed([s] { hostui::set_res_scale(s); });\n    }\n',
      '        if (radio(names[i], std::fabs(cur - s) < 0.01f)) post_changed([s] { hostui::set_res_scale(s); });\n    }\n'
      '#ifdef CT_FOREIGN_GUEST\n'
@@ -881,7 +934,7 @@ REPLACEMENTS['src/overlay/overlay.cpp'] += [
      '            hostui::set("touchControls", v ? "1" : "0");\n        });\n'
      '#ifdef CT_FOREIGN_GUEST\n'
      '    pip_percent("Controls opacity (%)", ct_touch::opacity(), ct_touch::kOpacityMin, 1.0f, ct_touch::set_opacity);\n'
-     '    help("How opaque the on-screen controls are drawn. The menu button (top left) sets it too.");\n'
+     '    help("How opaque the on-screen controls are drawn.");\n'
      '#endif  // Captain Toad touch controls opacity\n'
      '#endif\n'),
 ]
@@ -952,9 +1005,8 @@ REPLACEMENTS['src/gfx/overlay_appkit.mm'] = [
 ]
 # Android: one menu button in the top left corner (where the reference has its view button) in place of
 # the view button, the touch controls' show/hide button and the tilt button. Its menu (an Android dialog)
-# switches the view, shows or hides the touch controls, edits their layout, sets their opacity, turns
-# the phone's gyro on or off, applies the save cheats and opens the settings window
-# (runtime/ct_touch_menu.cpp). A long press still edits the layout. The controls are drawn with the
+# opens the settings window, edits the touch controls' layout, turns the phone's gyro on or off and
+# applies the save cheats (runtime/ct_touch_menu.cpp); display options live in Settings > Display only. A long press still edits the layout. The controls are drawn with the
 # opacity of Settings > Display > Touch controls; the menu button keeps the reference's look.
 _touch = '../android/app/src/main/java/org/wwhdrecomp/wwhd/TouchControls.java'
 REPLACEMENTS[_touch] = [
@@ -966,8 +1018,6 @@ REPLACEMENTS[_touch] = [
      '    private static native void nativeShowControls(boolean shown);\n'
      '    // Captain Toad\'s menu button (runtime/ct_touch_menu.cpp)\n'
      '    private static native int nativeMenuState();\n'
-     '    private static native int nativeNextView();\n'
-     '    private static native void nativeSwitchView();\n'
      '    private static native void nativeToggleTilt();\n'
      '    private static native void nativeOpenSettings();\n'
      '    private static native void nativeCheat(int which);\n'
@@ -1014,56 +1064,33 @@ REPLACEMENTS[_touch] = [
      '            nativeControllerConnected(controller);\n'
      '            final float o = nativeOpacity();\n'
      '            if (o != opacity) { opacity = o; invalidate(); }\n'
-     '            if (nativeCutoutClear() != cutoutClear && getContext() instanceof WwhdActivity)\n'
-     '                ((WwhdActivity) getContext()).cutoutChanged();  // reads it again\n'),
+     '            if (getContext() instanceof WwhdActivity)  // applyFullScreen reads the setting again\n'
+     '                ((WwhdActivity) getContext()).checkCutout(nativeCutoutClear() != cutoutClear);\n'),
     ('    @Override public void onWindowFocusChanged(boolean hasFocus) {\n',
      """    // ---- Captain Toad's menu (CaptainToadRecomp tools/patch_runtime.py, runtime/ct_touch_menu.cpp)
     private static final int[] CHEATS = {1, 2, 4, 8, 16, 32, 64};  // runtime/ct_save.h, as R.array.ct_cheats lists them
-    private static final float[] OPACITIES = {1f, 0.75f, 0.5f, 0.25f};
 
     private void showMenu() {
         if (menu != null && menu.isShowing()) return;
-        final int state, next;
-        try { state = nativeMenuState(); next = nativeNextView(); }
+        final int state;
+        try { state = nativeMenuState(); }
         catch (UnsatisfiedLinkError e) { return; }  // libmain.so not loaded yet
         final Context c = getContext();
-        final String[] views = c.getResources().getStringArray(R.array.ct_views);
-        final int view = state & 15;
         final boolean tilt = (state & 16) != 0;
+        // display options (view, picture shape, touch controls, opacity) live in Settings > Display only
         final String[] items = {
             c.getString(R.string.ct_menu_settings),
-            c.getString(R.string.ct_menu_view, view < views.length ? views[view] : "", next < views.length ? views[next] : ""),
-            c.getString(shown ? R.string.ct_menu_hide_controls : R.string.ct_menu_show_controls),
             c.getString(R.string.ct_menu_edit_layout),
-            c.getString(R.string.ct_menu_opacity, Math.round(opacity * 100)),
             c.getString(tilt ? R.string.ct_menu_tilt_off : R.string.ct_menu_tilt_on),
             c.getString(R.string.ct_menu_cheats)};
         show(new android.app.AlertDialog.Builder(c).setTitle(R.string.app_name).setItems(items, (d, which) -> {
             switch (which) {
                 case 0: nativeOpenSettings(); break;
-                case 1: nativeSwitchView(); break;
-                case 2: setShown(!shown); invalidate(); break;
-                case 3: post(this::beginEditing); break;
-                case 4: post(this::showOpacity); break;
-                case 5: nativeToggleTilt(); break;
-                case 6: post(this::showCheats); break;
+                case 1: post(this::beginEditing); break;
+                case 2: nativeToggleTilt(); break;
+                case 3: post(this::showCheats); break;
             }
         }).setNegativeButton(android.R.string.cancel, null));
-    }
-
-    private void showOpacity() {
-        int checked = 0;
-        for (int i = 1; i < OPACITIES.length; i++)
-            if (Math.abs(OPACITIES[i] - opacity) < Math.abs(OPACITIES[checked] - opacity)) checked = i;
-        final String[] names = new String[OPACITIES.length];
-        for (int i = 0; i < names.length; i++) names[i] = Math.round(OPACITIES[i] * 100) + "%";
-        show(new android.app.AlertDialog.Builder(getContext()).setTitle(R.string.ct_menu_opacity_title)
-            .setSingleChoiceItems(names, checked, (d, which) -> {
-                opacity = OPACITIES[which];
-                nativeSetOpacity(opacity);
-                invalidate();
-                d.dismiss();
-            }).setNegativeButton(android.R.string.cancel, null));
     }
 
     // each cheat asks first: it changes the save and closes the game (runtime/cheats.cpp)
@@ -1089,26 +1116,13 @@ REPLACEMENTS[_touch] = [
 REPLACEMENTS['../android/app/src/main/res/values/strings.xml'] += [
     ('</resources>\n', """    <!-- Captain Toad's menu button (CaptainToadRecomp tools/patch_runtime.py) -->
     <string name="ct_menu_settings">Settings</string>
-    <string name="ct_menu_view">View: %1$s (tap for %2$s)</string>
-    <string name="ct_menu_show_controls">Show touch controls</string>
-    <string name="ct_menu_hide_controls">Hide touch controls</string>
     <string name="ct_menu_edit_layout">Move and resize touch controls</string>
-    <string name="ct_menu_opacity">Touch controls opacity: %1$d%%</string>
-    <string name="ct_menu_opacity_title">Touch controls opacity</string>
     <string name="ct_menu_tilt_on">Tilt camera (phone gyro): off, tap to turn on</string>
     <string name="ct_menu_tilt_off">Tilt camera (phone gyro): on, tap to turn off</string>
     <string name="ct_menu_cheats">Cheats</string>
     <string name="ct_menu_cheats_title">Cheats (change your save)</string>
     <string name="ct_cheat_confirm">Your save is changed and Captain Toad closes: open it again to play with the cheat. Play since the game last saved is lost. The save from before the first cheat is kept as GameData.bin.before-cheats.</string>
     <string name="ct_cheat_apply">Apply and close</string>
-    <!-- gfx::DrcMode order -->
-    <string-array name="ct_views">
-        <item>separate window</item>
-        <item>picture-in-picture</item>
-        <item>automatic</item>
-        <item>TV only</item>
-        <item>GamePad only</item>
-    </string-array>
     <!-- runtime/ct_save.h bit order (TouchControls.CHEATS) -->
     <string-array name="ct_cheats">
         <item>Unlock every episode and course</item>
@@ -1122,22 +1136,39 @@ REPLACEMENTS['../android/app/src/main/res/values/strings.xml'] += [
 </resources>
 """),
 ]
-# Android: Settings > Display > Camera cutout. Keep clear lays the window out beside a punch-hole or notch
-# camera (a black bar along that edge); Use the area keeps the reference's layout into it.
+# Android: Settings > Display > Camera cutout. Keep clear lays the game out beside a punch-hole or notch
+# camera (a black bar along that edge); Use the area keeps the reference's layout into it. From Android 15
+# an app targeting SDK 35 or later always draws into the cutout (LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER is
+# ignored), so the window stays edge to edge and SDL's layout is padded by the cutout's safe insets.
 REPLACEMENTS['../android/app/src/main/java/org/wwhdrecomp/wwhd/WwhdActivity.java'] = [
-    ('            if (lp.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES &&\n',
-     '            if (TouchControls.cutoutClear()) {\n'
-     '                // Captain Toad: Settings > Display > Camera cutout > Keep clear (CaptainToadRecomp)\n'
-     '                if (lp.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER) {\n'
-     '                    lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER;\n'
-     '                    w.setAttributes(lp);\n'
-     '                }\n'
-     '            } else\n'
-     '            if (lp.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES &&\n'),
+    ('        syncSystemBars(w);\n        if (gamePadDisplay != null) gamePadDisplay.syncSystemBars();\n',
+     '        padForCutout(w);\n'
+     '        syncSystemBars(w);\n        if (gamePadDisplay != null) gamePadDisplay.syncSystemBars();\n'),
     ('    private final Runnable reapplyFullScreen = this::applyFullScreen;\n',
+     '    // Captain Toad: Settings > Display > Camera cutout > Keep clear (CaptainToadRecomp tools/patch_runtime.py)\n'
+     '    private void padForCutout(Window w) {\n'
+     '        if (mLayout == null) return;\n'
+     '        int l = 0, t = 0, r = 0, b = 0;\n'
+     '        if (mFullscreenModeActive && TouchControls.cutoutClear()) {\n'
+     '            WindowInsets insets = w.getDecorView().getRootWindowInsets();\n'
+     '            android.view.DisplayCutout cut = insets != null ? insets.getDisplayCutout() : null;\n'
+     '            if (cut != null) {  // none, or not laid out yet (TouchControls asks again)\n'
+     '                l = cut.getSafeInsetLeft(); t = cut.getSafeInsetTop(); r = cut.getSafeInsetRight(); b = cut.getSafeInsetBottom();\n'
+     '            }\n'
+     '        }\n'
+     '        if (mLayout.getPaddingLeft() == l && mLayout.getPaddingTop() == t && mLayout.getPaddingRight() == r &&\n'
+     '            mLayout.getPaddingBottom() == b) return;\n'
+     '        mLayout.setBackgroundColor(android.graphics.Color.BLACK);\n'
+     '        mLayout.setPadding(l, t, r, b);\n'
+     '    }\n'
+     '\n'
      '    private final Runnable reapplyFullScreen = this::applyFullScreen;\n'
-     '    // Captain Toad: the camera cutout setting changed (TouchControls polls it)\n'
-     '    void cutoutChanged() { applyFullScreen(); }\n'),
+     '    // Captain Toad: TouchControls asks ten times a second: the setting changed, or the screen turned\n'
+     '    // round (the camera on the other side)\n'
+     '    void checkCutout(boolean settingChanged) {\n'
+     '        if (settingChanged) applyFullScreen();\n'
+     '        else if (getWindow() != null) padForCutout(getWindow());\n'
+     '    }\n'),
 ]
 # Gyro controllers (macOS, Windows, Linux): the reference's Controller gyro source (SDL3 sensors; the
 # AppKit host's GameController.framework) and Cemuhook (DSU) move the virtual GamePad as on Android.

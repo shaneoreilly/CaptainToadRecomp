@@ -62,13 +62,6 @@ void set_cutout_clear(bool clear) {
 extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeMenuState(JNIEnv*, jclass) {
     return (hostui::drc_mode() & 15) | (motion::settings().source == motion::kDevice ? 16 : 0);
 }
-// the view the menu's view item switches to (picture-in-picture, GamePad only, TV only)
-extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeNextView(JNIEnv*, jclass) {
-    return gfx::next_view();
-}
-extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeSwitchView(JNIEnv*, jclass) {
-    hostui::post([] { hostui::set_drc_mode(gfx::next_view()); });
-}
 // the phone's gyro on or off, saved as Settings > Controls > Gyro's "device" source
 extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeToggleTilt(JNIEnv*, jclass) {
     hostui::post([] {
