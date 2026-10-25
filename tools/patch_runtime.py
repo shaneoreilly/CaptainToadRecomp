@@ -279,6 +279,10 @@ REPLACEMENTS['src/interp.cpp'] = [
     ('void set_mode(int m) {\n    g_on = false;\n',
      'void set_mode(int m) {\n' + _ct_keep.format('m = 0;  // Wind Waker HD frame pacing (its hooks); Captain Toad runs at 60') + '    g_on = false;\n'),
 ]
+REPLACEMENTS['src/gfx/gamepad_ui_state.cpp'] = [
+    ('void display_read_gamepad_ui() {\n    if (!display_gamepad_state_needed()) return;\n',
+     'void display_read_gamepad_ui() {\n#ifdef CT_FOREIGN_GUEST\n    return;\n#endif\n    if (!display_gamepad_state_needed()) return;\n'),
+]
 REPLACEMENTS['src/gfx/renderer.cpp'] = [
     ('void set_cloud_style(int style) { g_cloud_style.store(std::clamp(style, 0, 2), std::memory_order_relaxed); }\n',
      '#ifdef CT_FOREIGN_GUEST\nvoid set_cloud_style(int) { g_cloud_style.store(0, std::memory_order_relaxed); }  // Wind Waker HD only\n#else\n'
