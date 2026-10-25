@@ -41,7 +41,7 @@ The translator reported 36 words with primary opcode 0 and two calls to undefine
 
 ## Next milestone
 
-Play further levels with a real controller, produce stream-out output on the GPU, then work toward the first playable level and an Android build of the same runtime. Audio, controls, real saves, suspend/resume behavior and APK packaging remain to be validated.
+Play further levels with a real controller, produce stream-out output on the Vulkan renderer (Metal produces it since this change), then work toward the first playable level and an Android build of the same runtime. Audio, controls, real saves, suspend/resume behavior and APK packaging remain to be validated.
 
 Reaching startup and compiling native code do not establish full game correctness. The diagnostic intentionally stops at unsupported APIs rather than returning fabricated success.
 

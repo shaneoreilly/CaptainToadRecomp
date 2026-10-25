@@ -425,6 +425,165 @@ REPLACEMENTS['src/gfx/metal_draw.mm'] = [
      'void set_ao_mode(int m) {\n' + _ct_keep.format('m = 0;  // Wind Waker HD only') + '    g_ao_mode = m % 3;'),
     ('void set_ao_hires(bool v) { g_ao_hires = v;',
      'void set_ao_hires(bool v) {\n' + _ct_keep.format('v = false;  // Wind Waker HD only') + '    g_ao_hires = v;'),
+    # Stream-out on the GPU, as Cemu's Metal renderer does it: vertex shaders that write stream-out data
+    # store it through a device pointer (sb) into guest memory at each buffer's write offset, which
+    # gx2_core.cpp advances after the draw. Draws with rasterization disabled run alone, in a pass
+    # without attachments. Captain Toad's effects (particles and trails) are drawn from these buffers.
+    ('    opt.strictMul = strictMul;\n',
+     '    opt.strictMul = strictMul;\n'
+     '    opt.useTFViaSSBO = vertex;  // stream-out writes go to a device buffer (sb)\n'),
+    ('        cache_record_pipeline(regs, vs, ps, fsKey, tf);\n',
+     '        if (ps) cache_record_pipeline(regs, vs, ps, fsKey, tf);  // no pixel shader: a stream-out-only draw\n'),
+    ('    d.fragmentFunction = ps->fn;\n',
+     '    d.fragmentFunction = ps ? ps->fn : nil;\n'
+     '    if (!ps) d.rasterizationEnabled = NO;  // stream-out only: the vertex shader writes the buffers\n'),
+    ('static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Shader* sh, bool vertex, Surface* const* colors) {\n',
+     '// ---- stream-out (Captain Toad)\n'
+     'static uint32_t g_so_vertices = 0;  // the current draw\'s vertices per instance (supportBuffer.verticesPerInstance)\n'
+     '// stream-out buffers written so far: draws read them in place (the GPU writes them), never from a snapshot\n'
+     'static std::vector<std::pair<uint32_t, uint32_t>> g_so_ranges;\n'
+     'static bool so_written(uint32_t addr, uint32_t size) {\n'
+     '    for (auto& r : g_so_ranges)\n'
+     '        if (addr < r.first + r.second && r.first < addr + size) return true;\n'
+     '    return false;\n'
+     '}\n'
+     '// Every buffer the shader writes is mapped, in one guest memory buffer (the shader drops writes past\n'
+     '// a buffer\'s end, as the hardware does: supportBuffer.streamoutBufferEnd).\n'
+     'static bool streamout_ready(const uint32_t* regs, const LatteDecompilerShader* dec, uint64_t vertices) {\n'
+     '    id<MTLBuffer> region = nil;\n'
+     '    for (int i = 0; i < LATTE_NUM_STREAMOUT_BUFFER; i++) {\n'
+     '        if (dec->uniform.loc_streamoutBufferBase[i] < 0) continue;\n'
+     '        const uint32_t base = regs[mmVGT_STRMOUT_BUFFER_BASE_0 + i * 4], size = regs[mmVGT_STRMOUT_BUFFER_SIZE_0 + i * 4] << 2;\n'
+     '        const uint64_t offset = regs[mmVGT_STRMOUT_BUFFER_OFFSET_0 + i * 4], stride = regs[mmVGT_STRMOUT_VTX_STRIDE_0 + i * 4] << 2;\n'
+     '        uint32_t off = 0;\n'
+     '        id<MTLBuffer> b = base && size ? guest_buffer(base, &off) : nil;\n'
+     '        if (!b || (region && b != region) || off + uint64_t(size) > b.length || offset > size) {\n'
+     '            static int logged = 0;\n'
+     '            if (logged++ < 8)\n'
+     '                LOG("[gfx] stream-out draw skipped: buffer %d at %08X size %X offset %llX, %llu vertices of %llu bytes%s", i, base, size,\n'
+     '                    (unsigned long long)offset, (unsigned long long)vertices, (unsigned long long)stride, b ? "" : " (not in guest memory)");\n'
+     '            return false;\n'
+     '        }\n'
+     '        region = b;\n'
+     '        if (!so_written(base, size) && g_so_ranges.size() < 256) g_so_ranges.push_back({base, size});\n'
+     '    }\n'
+     '    return true;\n'
+     '}\n'
+     'static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Shader* sh, bool vertex, Surface* const* colors) {\n'),
+    ('            sz[1] = (regs[REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS + t * 7 + 1] & 0x1FFF) + 1;\n        }\n'
+     '        if (buf.size() <= 4096) {\n',
+     '            sz[1] = (regs[REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS + t * 7 + 1] & 0x1FFF) + 1;\n        }\n'
+     '        if (vertex && dec->uniform.loc_verticesPerInstance >= 0) {  // stream-out (streamout_ready checked the buffers)\n'
+     '            *(sint32*)at(dec->uniform.loc_verticesPerInstance) = (sint32)g_so_vertices;\n'
+     '            for (int i = 0; i < LATTE_NUM_STREAMOUT_BUFFER; i++) {\n'
+     '                if (dec->uniform.loc_streamoutBufferBase[i] < 0) continue;\n'
+     '                const uint32_t base = regs[mmVGT_STRMOUT_BUFFER_BASE_0 + i * 4];\n'
+     '                uint32_t off = 0;\n'
+     '                id<MTLBuffer> b = guest_buffer(base, &off);\n'
+     '                *(sint32*)at(dec->uniform.loc_streamoutBufferBase[i]) = (sint32)(off + regs[mmVGT_STRMOUT_BUFFER_OFFSET_0 + i * 4]);\n'
+     '                *(sint32*)at(dec->uniform.loc_streamoutBufferBase[i] + 4) = (sint32)(off + (regs[mmVGT_STRMOUT_BUFFER_SIZE_0 + i * 4] << 2));\n'
+     '                if (rm.tfStorageBindingPoint >= 0) [enc setVertexBuffer:b offset:0 atIndex:rm.tfStorageBindingPoint];\n'
+     '            }\n'
+     '        }\n'
+     '        if (buf.size() <= 4096) {\n'),
+    ('// ---------------------------------------------------------------- draw\n',
+     '// A stream-out draw with rasterization disabled: only its vertex shader runs, writing the stream-out\n'
+     '// buffers, in a pass without attachments (kept open for the next such draw).\n'
+     'static bool streamout_only(const uint32_t* regs, Shader* vs, LatteFetchShader* fs, uint64_t fsKey, uint32_t prim, uint32_t count,\n'
+     '                           uint32_t indexType, uint32_t indexAddr, uint32_t baseVertex, uint32_t instances) {\n'
+     '    if (!vs || !vs->dec) return false;\n'
+     '    retry_failed_compile(vs, false);\n'
+     '    if (vs->state == CS_FAILED) return false;\n'
+     '    compile_deferred(vs);\n'
+     '    if (!wait_compiled(vs->state) || !vs->dec->hasStreamoutBufferWrite) return false;\n'
+     '    static std::vector<uint32_t> indices;\n'
+     '    MTLPrimitiveType ptype;\n'
+     '    if (!build_indices(prim, count, indexType, indexAddr, indices, ptype)) return false;\n'
+     '    uint64_t span = uint64_t(baseVertex) + count;\n'
+     '    for (uint32_t i : indices) span = std::max<uint64_t>(span, uint64_t(baseVertex) + i + 1);\n'
+     '    if (!streamout_ready(regs, vs->dec, span + uint64_t(count) * (instances - 1))) return false;\n'
+     '    TargetFormats none;\n'
+     '    id<MTLRenderPipelineState> pipe = get_pipeline(regs, vs, nullptr, fs, fsKey, none);\n'
+     '    if (!pipe) return false;\n'
+     '    bool open = R.enc && !R.passDepth;\n'
+     '    for (auto* c : R.passColor) open = open && !c;\n'
+     '    if (!open) {\n'
+     '        end_encoder();\n'
+     '        MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];\n'
+     '        rp.renderTargetWidth = 1;\n'
+     '        rp.renderTargetHeight = 1;\n'
+     '        rp.defaultRasterSampleCount = 1;\n'
+     '        R.enc = [command_buffer() renderCommandEncoderWithDescriptor:rp];\n'
+     '        if (!R.enc) return false;\n'
+     '        for (auto& c : R.passColor) c = nullptr;\n'
+     '        R.passDepth = nullptr;\n'
+     '    }\n'
+     '    id<MTLRenderCommandEncoder> enc = R.enc;\n'
+     '    [enc setRenderPipelineState:pipe];\n'
+     '    for (auto& g : fs->bufferGroups) {\n'
+     '        uint32_t off = 0;\n'
+     '        id<MTLBuffer> b = guest_buffer(regs[mmSQ_VTX_ATTRIBUTE_BLOCK_START + g.attributeBufferIndex * 7], &off);\n'
+     '        if (b) [enc setVertexBuffer:b offset:off atIndex:GET_MTL_VERTEX_BUFFER_INDEX(g.attributeBufferIndex)];\n'
+     '    }\n'
+     '    Surface* noColors[8] = {};\n'
+     '    g_so_vertices = count;\n'
+     '    R.binding = true;\n'
+     '    bind_stage(enc, regs, vs, true, noColors);\n'
+     '    R.binding = false;\n'
+     '    if (indices.empty()) {\n'
+     '        [enc drawPrimitives:ptype vertexStart:baseVertex vertexCount:count instanceCount:instances];\n'
+     '    } else {\n'
+     '        Upload u = upload(indices.data(), (uint32_t)(indices.size() * 4));\n'
+     '        [enc drawIndexedPrimitives:ptype indexCount:indices.size() indexType:MTLIndexTypeUInt32 indexBuffer:u.buf\n'
+     '                 indexBufferOffset:u.offset instanceCount:instances baseVertex:baseVertex baseInstance:0];\n'
+     '    }\n'
+     '    [enc memoryBarrierWithScope:MTLBarrierScopeBuffers afterStages:MTLRenderStageVertex beforeStages:MTLRenderStageVertex];\n'
+     '    static bool logged = false;\n'
+     '    if (!logged) { logged = true; LOG("[gfx] stream-out: vertex shaders write their buffers on the GPU"); }\n'
+     '    return true;\n'
+     '}\n'
+     '// ---------------------------------------------------------------- draw\n'),
+    ('    if (regs[REGADDR::PA_CL_CLIP_CNTL] & (1 << 22)) { g_skip[SK_RASTER_KILL]++; return; }  // rasterization disabled\n',
+     '    const bool rasterKill = (regs[REGADDR::PA_CL_CLIP_CNTL] & (1 << 22)) != 0;  // rasterization disabled\n'
+     '    if (rasterKill && !regs[mmVGT_STRMOUT_EN]) { g_skip[SK_RASTER_KILL]++; return; }\n'),
+    ('    Shader* ps = get_shader(regs, false, fs, fsKey);\n',
+     '    if (rasterKill) {  // stream-out only\n'
+     '        if (!streamout_only(regs, vs, fs, fsKey, prim, count, indexType, indexAddr, baseVertex, instances)) g_skip[SK_RASTER_KILL]++;\n'
+     '        return;\n'
+     '    }\n'
+     '    Shader* ps = get_shader(regs, false, fs, fsKey);\n'),
+    ('        if (g_snapshot && size <= kSnapshotLimit) {\n',
+     '        if (g_snapshot && size <= kSnapshotLimit && !so_written(addr, size)) {\n'),
+    ('        R.binding = true;\n        bind_stage(enc, regs, vs, true, colors);\n',
+     '        g_so_vertices = count;\n'
+     '        const bool streamout = vs->dec->uniform.loc_verticesPerInstance >= 0;\n'
+     '        if (streamout) {\n'
+     '            uint64_t span = uint64_t(baseVertex) + count;\n'
+     '            for (uint32_t i : indices) span = std::max<uint64_t>(span, uint64_t(baseVertex) + i + 1);\n'
+     '            if (!streamout_ready(regs, vs->dec, span + uint64_t(count) * (instances - 1))) { g_skip[SK_NO_SHADER]++; return; }\n'
+     '        }\n'
+     '        R.binding = true;\n        bind_stage(enc, regs, vs, true, colors);\n'),
+    ('    for (int i = 0; i < 8; i++)\n        if (colors[i] && regs[mmCB_COLOR0_BASE + i]) g_target_drawn[regs[mmCB_COLOR0_BASE + i]].drawn(R.frame);\n',
+     '    if (vs->dec->uniform.loc_verticesPerInstance >= 0)  // later draws read the stream-out output\n'
+     '        [enc memoryBarrierWithScope:MTLBarrierScopeBuffers afterStages:MTLRenderStageVertex beforeStages:MTLRenderStageVertex];\n'
+     '    for (int i = 0; i < 8; i++)\n        if (colors[i] && regs[mmCB_COLOR0_BASE + i]) g_target_drawn[regs[mmCB_COLOR0_BASE + i]].drawn(R.frame);\n'),
+]
+# Stream-out on Metal: each buffer's end (bytes, after its base in the support buffer) bounds the
+# vertex shader's writes, which the hardware drops past a buffer's end (draws often emit more vertices
+# than their buffer holds).
+REPLACEMENTS['third_party/cemu/Cafe/HW/Latte/LegacyShaderDecompiler/LatteDecompilerEmitMSLHeader.hpp'] = [
+    ('\t\t\t\t\tsrc->addFmt("int streamoutBufferBase{};" _CRLF, i);\n'
+     '\t\t\t\t\tuniformOffsets.offset_streamoutBufferBase[i] = uniformCurrentOffset;\n'
+     '\t\t\t\t\tuniformCurrentOffset += 4;\n',
+     '\t\t\t\t\tsrc->addFmt("int streamoutBufferBase{};" _CRLF, i);\n'
+     '\t\t\t\t\tuniformOffsets.offset_streamoutBufferBase[i] = uniformCurrentOffset;\n'
+     '\t\t\t\t\tuniformCurrentOffset += 4;\n'
+     '\t\t\t\t\tsrc->addFmt("int streamoutBufferEnd{};" _CRLF, i);  // Captain Toad: bounds the writes\n'
+     '\t\t\t\t\tuniformCurrentOffset += 4;\n'),
+]
+REPLACEMENTS['third_party/cemu/Cafe/HW/Latte/LegacyShaderDecompiler/LatteDecompilerEmitMSL.cpp'] = [
+    ('\t\t\tsrc->addFmt("sb[sbBase{} + {}]", streamoutBufferIndex, u32Offset);\n',
+     '\t\t\tsrc->addFmt("if (sbBase{0} + {1} < supportBuffer.streamoutBufferEnd{0} / 4) sb[sbBase{0} + {1}]", streamoutBufferIndex, u32Offset);\n'),
 ]
 REPLACEMENTS['src/gfx/vulkan/settings.cpp'] = [
     ('void set_ao_mode(int v) { settings().ao.store(normalize(v),std::memory_order_relaxed);',
