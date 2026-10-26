@@ -33,7 +33,8 @@ def main():
         if len(address) != 8 or int(address, 16) % 4:
             parser.error(f'profile hook {address!r} is not a function address')
     if 'hook_paths' not in inspect.signature(Recompiler.__init__).parameters:
-        parser.error('reference recompiler is missing the explicit hook_paths extension')
+        parser.error('reference recompiler is missing the explicit hook_paths extension; '
+                     'run tools/setup_reference.sh (or .ps1) or tools/patch_runtime.py')
     if args.output.exists() and any(args.output.iterdir()):
         parser.error('output must be empty; use a new --output for another generation')
     rpx = Rpx(str(rpx_path))

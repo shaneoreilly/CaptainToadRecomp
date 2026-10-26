@@ -8,6 +8,7 @@
 #include "aspect.h"
 
 #include <cmath>
+#include <cstdlib>
 
 namespace ss { void ct_service(Cpu* c); }  // savestate.cpp, Captain Toad additions (tools/patch_runtime.py)
 
@@ -46,15 +47,15 @@ extern "C" void hook_02420F10(Cpu* c) {
 // buffers (tools/patch_runtime.py, screen_shaped).
 extern "C" __attribute__((weak)) void f_023734F8_orig(Cpu* c);
 extern "C" void hook_023734F8(Cpu* c) {
-    const uint32_t rect = c->r[4];
+    const uint32_t rect = c->r[4], layer = c->r[5];
     const float w = u32_as_f32(ld32(rect + 8)) - u32_as_f32(ld32(rect)),
                 h = u32_as_f32(ld32(rect + 12)) - u32_as_f32(ld32(rect + 4));
     f_023734F8_orig(c);
     const float want = aspect::game();
     if (h > 0 && std::fabs(w / h - kCtBaseAspect) < 0.01f && want != kCtBaseAspect) st32(c->r[3] + 0x130, f32_as_u32(want));
-    static int seen = 0;
-    if (seen < 8) LOG("[aspect] camera %d: viewport %.0fx%.0f, aspect %.4f", seen++, w, h,
-                      u32_as_f32(ld32(c->r[3] + 0x130)));
+    static const bool log_cameras = std::getenv("CT_LOG_ASPECT") != nullptr;  // each camera's viewport and aspect
+    if (log_cameras) LOG("[aspect] camera: viewport %.0fx%.0f, layer %u, aspect %.4f", w, h, layer,
+                 u32_as_f32(ld32(c->r[3] + 0x130)));
 }
 
 // Return addresses that continue the same way, for the save-state check that a parked thread is where
